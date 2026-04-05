@@ -1,0 +1,36 @@
+# Build artifacts
+bin/
+coverage.out
+coverage.html
+
+# Database files (may contain sensitive memories)
+*.db
+*.db-shm
+*.db-wal
+
+# Environment & secrets
+.env
+*.env
+/configs/*.yaml
+!/configs/*.example.yaml
+
+# Go toolchain
+vendor/
+
+# Kubernetes secrets (never commit — use kubectl apply out-of-band)
+deploy/kubernetes/secret.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+ia-recuerdo-export.json
+engram-export.json

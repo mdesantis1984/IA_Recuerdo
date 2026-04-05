@@ -1,0 +1,15 @@
+# ──────────────────────────────────────────────────────────────────
+# IA_Recuerdo (raíz — docs + code)
+# ──────────────────────────────────────────────────────────────────
+
+# Configuración MCP local (puede contener IPs, tokens o paths internos)
+.mcp.json
+!.mcp.json.example
+
+# Configuración local de VS Code (settings personales, launch configs)
+.vscode/settings.json
+.vscode/launch.json
+
+# OS
+.DS_Store
+Thumbs.db

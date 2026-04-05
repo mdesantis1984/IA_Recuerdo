@@ -1,0 +1,44 @@
+[Unit]
+Description=IA_Recuerdo — Sistema de memoria centralizado potenciado
+Documentation=https://github.com/thiscloud/ia-recuerdo
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=ia-recuerdo
+Group=ia-recuerdo
+WorkingDirectory=/opt/ia-recuerdo
+
+# Binary
+ExecStart=/opt/ia-recuerdo/ia-recuerdo \
+    -transport http \
+    -addr :7438 \
+    -db-driver postgres \
+    -db-dsn "${IA_DB_DSN}" \
+    -valkey "${IA_VALKEY}" \
+    -project default
+
+# Environment (override with /etc/ia-recuerdo/env)
+EnvironmentFile=-/etc/ia-recuerdo/env
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/ia-recuerdo/data
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ia-recuerdo
+
+[Install]
+WantedBy=multi-user.target
