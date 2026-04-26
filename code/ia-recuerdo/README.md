@@ -2,7 +2,7 @@
 
 Sistema de memoria persistente centralizado para agentes IA.
 
-## Resumen
+## Capacidades
 
 - MCP por `stdio` y `HTTP`
 - REST API para observaciones, sesiones, prompts, exportación y métricas
@@ -12,6 +12,13 @@ Sistema de memoria persistente centralizado para agentes IA.
 - Consolidación de proyectos
 - Adjuntos y relaciones entre observaciones
 - Contenido pesado separado de metadata
+
+## Inicio rápido
+
+```bash
+make build-postgres
+./ia-recuerdo -transport both -addr :7438 -db-driver postgres -db-dsn "postgres://..."
+```
 
 ## Configuración MCP
 

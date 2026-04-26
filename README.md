@@ -2,12 +2,15 @@
 
 > CT204: memoria persistente centralizada para agentes IA.
 
-## Puntos clave
+## Qué es
 
-- Código principal: `code/ia-recuerdo`
-- Despliegue productivo: PostgreSQL + MCP HTTP
-- Documentación SDD: `IA_Recuerdo.md`
-- Migración y operación: `IA_Recuerdo_Migracion_PostgreSQL.md`
+IA_Recuerdo es el servicio de memoria de la infraestructura IA local. Expone MCP y REST API sobre PostgreSQL, con soporte para búsqueda semántica, adjuntos y relaciones entre observaciones.
+
+## Dónde vive
+
+- Código: `code/ia-recuerdo`
+- SDD: `IA_Recuerdo.md`
+- Migración/operación: `IA_Recuerdo_Migracion_PostgreSQL.md`
 
 ## Infraestructura
 
@@ -16,12 +19,18 @@
 
 ## Acceso
 
-- MCP HTTP en `http://<HOST>:7438/mcp`
-- REST API en `http://<HOST>:7438/api/v1`
+- MCP HTTP: `http://<HOST>:7438/mcp`
+- REST API: `http://<HOST>:7438/api/v1`
 
-## Estado
+## Estado actual
 
 - PostgreSQL-only en producción
 - Búsqueda semántica con `pgvector`
 - Adjuntos y relaciones habilitados
 - Contenido pesado separado de metadata
+
+## Flujo GitFlow
+
+- `main` para producción
+- `develop` para integración
+- ramas `feature/*` o `release/*` para cambios
