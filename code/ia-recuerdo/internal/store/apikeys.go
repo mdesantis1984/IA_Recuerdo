@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -72,6 +73,84 @@ func (s *Store) ValidateAPIKey(ctx context.Context, keyHash string) (bool, error
 		return false, nil
 	}
 	return true, nil
+}
+
+// LookupAPIKeyByHash returns a non-revoked, non-expired API key by its hash.
+func (s *Store) LookupAPIKeyByHash(ctx context.Context, keyHash string) (*APIKey, error) {
+	var key APIKey
+	var revoked int
+	var expiresAt sql.NullInt64
+
+	if s.pg() {
+		var createdAt time.Time
+		var expiresPg sql.NullTime
+		err := s.db.QueryRowContext(ctx,
+			`SELECT id, name, scopes, created_at, expires_at, revoked::int FROM api_keys WHERE key_hash=$1`, keyHash,
+		).Scan(&key.ID, &key.Name, &key.Scopes, &createdAt, &expiresPg, &revoked)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		key.CreatedAt = createdAt
+		if expiresPg.Valid {
+			t := expiresPg.Time
+			key.ExpiresAt = &t
+		}
+		key.Revoked = revoked == 1
+		if key.Revoked {
+			return &key, nil
+		}
+		if expiresPg.Valid && expiresPg.Time.Before(time.Now().UTC()) {
+			return nil, nil
+		}
+		return &key, nil
+	}
+
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, scopes, created_at, expires_at, revoked FROM api_keys WHERE key_hash=?`, keyHash,
+	).Scan(&key.ID, &key.Name, &key.Scopes, &key.CreatedAt, &expiresAt, &revoked)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if expiresAt.Valid {
+		t := time.Unix(expiresAt.Int64, 0).UTC()
+		key.ExpiresAt = &t
+	}
+	key.Revoked = revoked == 1
+	if key.Revoked {
+		return &key, nil
+	}
+	if expiresAt.Valid && time.Unix(expiresAt.Int64, 0).UTC().Before(time.Now().UTC()) {
+		return nil, nil
+	}
+	return &key, nil
+}
+
+// HasScopes returns true if actual scopes satisfy all required scopes.
+func HasScopes(actual string, required ...string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	set := map[string]struct{}{}
+	for _, s := range strings.FieldsFunc(strings.ToLower(actual), func(r rune) bool { return r == ',' || r == ' ' || r == ';' }) {
+		if s != "" {
+			set[s] = struct{}{}
+		}
+	}
+	if _, ok := set["owner"]; ok {
+		return true
+	}
+	for _, req := range required {
+		if _, ok := set[strings.ToLower(req)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // ListAPIKeys returns all non-revoked API keys (without key_hash).

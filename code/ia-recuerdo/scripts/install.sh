@@ -63,7 +63,7 @@ echo "       psql -U postgres -c \"GRANT ALL ON DATABASE ia_recuerdo TO ia_recue
 echo "  3. Inicia el servicio: systemctl enable --now ia-recuerdo"
 echo "  4. Verifica: curl http://localhost:7438/healthz"
 echo "  5. Crea tu primera API key:"
-echo "       # Necesitas un ADMIN_KEY - crea uno en modo sqlite primero si es necesario"
+echo "       # Necesitas un ADMIN_KEY - crea uno en PostgreSQL antes de continuar"
 echo "       curl -X POST http://localhost:7438/api/v1/keys -H 'X-Api-Key: ADMIN' -d '{\"name\":\"vscode\"}'"
 echo ""
 echo "Configuración MCP en VS Code (.vscode/mcp.json):"

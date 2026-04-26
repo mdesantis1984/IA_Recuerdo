@@ -11,12 +11,16 @@ import (
 	"github.com/mdesantis1984/ia-recuerdo/pkg/types"
 )
 
-// newTestStore creates an in-memory SQLite store for testing.
+// newTestStore creates a PostgreSQL-backed store for testing.
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
+	dsn := os.Getenv("IA_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("IA_TEST_PG_DSN not set")
+	}
 	s, err := store.New(context.Background(), store.Config{
-		Driver: "sqlite",
-		DSN:    ":memory:",
+		Driver: "postgres",
+		DSN:    dsn,
 	})
 	if err != nil {
 		t.Fatalf("newTestStore: %v", err)
@@ -132,6 +136,9 @@ func TestGetObservation(t *testing.T) {
 	}
 	if got.Title != "Fetchable" {
 		t.Fatalf("title mismatch: %q", got.Title)
+	}
+	if got.Content != "content" {
+		t.Fatalf("expected full content, got %q", got.Content)
 	}
 }
 
@@ -403,6 +410,49 @@ func TestListAll(t *testing.T) {
 	}
 	if len(all) != 2 {
 		t.Fatalf("expected 2, got %d", len(all))
+	}
+}
+
+func TestSaveAttachment(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	obs, _ := s.SaveObservation(ctx, &types.Observation{Title: "Attachment parent", Content: "content", Type: types.TypeDiscovery, Project: "p"})
+	att, err := s.SaveAttachment(ctx, obs.ID, "note.txt", "text/plain", []byte("hello"))
+	if err != nil {
+		t.Fatalf("SaveAttachment: %v", err)
+	}
+	if att.ID == 0 || att.SHA256 == "" {
+		t.Fatal("expected attachment to be stored")
+	}
+	items, err := s.ListAttachments(ctx, obs.ID)
+	if err != nil {
+		t.Fatalf("ListAttachments: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(items))
+	}
+}
+
+func TestSaveRelation(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	a, _ := s.SaveObservation(ctx, &types.Observation{Title: "A", Content: "content", Type: types.TypeDiscovery, Project: "p"})
+	b, _ := s.SaveObservation(ctx, &types.Observation{Title: "B", Content: "content", Type: types.TypeDiscovery, Project: "p"})
+	rel, err := s.SaveRelation(ctx, a.ID, b.ID, "related")
+	if err != nil {
+		t.Fatalf("SaveRelation: %v", err)
+	}
+	if rel.ID == 0 {
+		t.Fatal("expected relation id")
+	}
+	items, err := s.ListRelations(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("ListRelations: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 relation, got %d", len(items))
 	}
 }
 

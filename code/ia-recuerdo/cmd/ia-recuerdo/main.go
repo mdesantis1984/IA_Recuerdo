@@ -30,8 +30,8 @@ var version = "dev"
 func main() {
 	transport  := flag.String("transport",    envOr("IA_TRANSPORT", "http"),          "Transport: stdio|http|both")
 	addr       := flag.String("addr",         envOr("IA_ADDR", ":7438"),              "HTTP listen address")
-	dbDriver   := flag.String("db-driver",    envOr("IA_DB_DRIVER", "sqlite"),        "DB driver: sqlite|postgres")
-	dbDSN      := flag.String("db-dsn",       envOr("IA_DB_DSN", "ia-recuerdo.db"),   "DB DSN or file path")
+	dbDriver   := flag.String("db-driver",    envOr("IA_DB_DRIVER", "postgres"),      "DB driver: postgres")
+	dbDSN      := flag.String("db-dsn",       envOr("IA_DB_DSN", ""),                 "PostgreSQL DSN")
 	embedURL   := flag.String("embed-url",    envOr("IA_EMBED_URL", ""),              "Embedding API URL (e.g. http://ollama:11434/v1/embeddings)")
 	embedModel := flag.String("embed-model",  envOr("IA_EMBED_MODEL", "nomic-embed-text"), "Embedding model name")
 	embedToken := flag.String("embed-token",  envOr("IA_EMBED_TOKEN", ""),            "Embedding API Bearer token (optional for local Ollama)")
