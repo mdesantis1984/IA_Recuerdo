@@ -8,9 +8,9 @@ IA_Recuerdo es el servicio de memoria de la infraestructura IA local. Expone MCP
 
 ## Dónde vive
 
-- Código: `code/ia-recuerdo`
-- SDD: `IA_Recuerdo.md`
-- Migración/operación: `IA_Recuerdo_Migracion_PostgreSQL.md`
+- Código: [`code/ia-recuerdo`](code/ia-recuerdo)
+- SDD: [`IA_Recuerdo.md`](IA_Recuerdo.md)
+- Migración/operación: [`IA_Recuerdo_Migracion_PostgreSQL.md`](IA_Recuerdo_Migracion_PostgreSQL.md)
 
 ## Infraestructura
 
