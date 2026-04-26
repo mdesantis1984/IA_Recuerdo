@@ -78,7 +78,7 @@ Compatibles con Engram — los agentes migran transparentemente:
 | `mem_stats` | Estadísticas del sistema |
 | `mem_capture_passive` | Extraer aprendizajes de texto |
 | `mem_merge_projects` | Fusionar nombres de proyecto |
-| `mem_semantic_search` | **Búsqueda semántica por embeddings** (fallback a FTS si no hay embedder) |
+| `mem_semantic_search` | Búsqueda semántica por embeddings |
 
 ## REST API
 
@@ -151,7 +151,7 @@ apt install postgresql-16-pgvector
 {"name": "mem_semantic_search", "arguments": {"query": "error de autenticación en JWT", "project": "mi-proyecto"}}
 ```
 
-Si no hay embedder configurado, `mem_semantic_search` hace **fallback automático** a búsqueda FTS.
+Si no hay embedder configurado, `mem_semantic_search` no queda habilitado para uso semántico.
 
 ## Instalación en Proxmox
 
@@ -238,28 +238,9 @@ curl http://<HOST>:7438/api/v1/search?q=test \
 
 ---
 
-## Agradecimientos
+## Notas
 
-Este proyecto no existiría sin el trabajo de **Alan Buscaglia** y la comunidad **Gentleman Programming**.
-
-**IA_Recuerdo** es una extensión de [Engram](https://github.com/Gentleman-Programming/engram) — el sistema de memoria persistente para agentes IA que Alan construyó de cero con Go, SQLite y FTS5. Si llegaste hasta aquí, te recomiendo explorar todo el ecosistema que ha creado:
-
-| Proyecto | Descripción |
-|----------|-------------|
-| [Engram](https://github.com/Gentleman-Programming/engram) ⭐ 2.2k | Memoria persistente para agentes IA — la base de este proyecto |
-| [Gentle AI](https://github.com/Gentleman-Programming/gentle-ai) ⭐ 1.6k | Configurador del ecosistema IA completo |
-| [Gentleman Skills](https://github.com/Gentleman-Programming/Gentleman-Skills) | Skills curados para Claude Code, OpenCode, Cursor y más |
-| [Gentleman Guardian Angel](https://github.com/Gentleman-Programming/gentleman-guardian-angel) | Code review con IA, agnóstico de proveedor |
-| [Agent Teams Lite](https://github.com/Gentleman-Programming/agent-teams-lite) | SDD con 9 sub-agentes especializados |
-
-### Seguí a Alan
-
-- 🎥 **YouTube** — [youtube.com/@GentlemanProgramming](https://www.youtube.com/@GentlemanProgramming) — 100K+ suscriptores, tutoriales de arquitectura, IA y desarrollo
-- 🌐 **Web personal** — [alan-buscaglia.vercel.app](https://alan-buscaglia.vercel.app/home)
-- 🔗 **Todos sus links** — [doras.to/gentleman-programming](https://doras.to/gentleman-programming)
-- 🐙 **GitHub** — [github.com/Alan-TheGentleman](https://github.com/Alan-TheGentleman)
-- 📚 **Libro gratuito** — [The Amazing Gentleman Programming Book](https://the-amazing-gentleman-programming-book.vercel.app/) — Clean Architecture, SOLID, TDD
-
-> *"Concepts over code. Foundations over frameworks. We are Tony Stark. AI is Jarvis."*
-> — Alan Buscaglia
+- CT203 es el orquestador MCP.
+- CT204 es el servicio de memoria persistente.
+- La documentación de transición Engram se conserva solo como legado.
 
