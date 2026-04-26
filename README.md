@@ -1,23 +1,23 @@
 # IA_Recuerdo
 
-> Sistema de memoria persistente centralizado — potenciación de [Engram](https://github.com/Gentleman-Programming/engram) accesible sin binario local.
+> CT204: memoria persistente centralizada para agentes IA, accesible sin binario local.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://golang.org)
 [![MCP](https://img.shields.io/badge/MCP-2024--11--05-blueviolet)](https://spec.modelcontextprotocol.io/)
-[![SQLite](https://img.shields.io/badge/SQLite-embedded-blue?logo=sqlite)](https://pkg.go.dev/modernc.org/sqlite)
+[![SQLite](https://img.shields.io/badge/SQLite-dev-blue?logo=sqlite)](https://pkg.go.dev/modernc.org/sqlite)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-336791?logo=postgresql)](https://github.com/pgvector/pgvector)
 
-## Diferencias clave vs Engram
+## Baseline CT204
 
-| Característica | Engram | IA_Recuerdo |
-|---|---|---|
-| Transporte | Solo stdio (local) | **stdio + HTTP MCP** (remoto) |
-| Base de datos | SQLite | SQLite (dev) / **PostgreSQL** (prod) |
-| Búsqueda semántica | No | **pgvector** (Ollama/OpenAI) |
-| Caché | No | **Valkey** |
-| Instalación en cliente | Binario obligatorio | **No requerida** |
-| Puerto | 7437 | **7438** |
+| Característica | IA_Recuerdo |
+|---|---|
+| Transporte | `stdio + HTTP MCP` |
+| Base de datos | SQLite (dev) / PostgreSQL (prod) |
+| Búsqueda semántica | pgvector (Ollama/OpenAI) |
+| Caché | No usada |
+| Instalación en cliente | No requerida |
+| Puerto | 7438 |
 
 ## Inicio rápido
 
@@ -32,19 +32,17 @@ make build-postgres
 
 ## Configuración MCP en VS Code
 
-Sin instalar nada en el cliente:
-
 ```json
 {
   "servers": {
     "ia-recuerdo": {
-      "url": "http://<HOST>:7438/mcp/rpc"
+      "url": "http://<HOST>:7438/mcp"
     }
   }
 }
 ```
 
-## Configuración MCP drop-in Engram (stdio)
+## Configuración MCP drop-in
 
 ```json
 {
@@ -57,9 +55,9 @@ Sin instalar nada en el cliente:
 }
 ```
 
-## 15 MCP Tools disponibles
+## 16 MCP Tools disponibles
 
-Compatibles con Engram — los agentes migran transparentemente:
+Contrato actual de `internal/mcp/tools.go`:
 
 | Tool | Descripción |
 |---|---|
@@ -78,188 +76,22 @@ Compatibles con Engram — los agentes migran transparentemente:
 | `mem_stats` | Estadísticas del sistema |
 | `mem_capture_passive` | Extraer aprendizajes de texto |
 | `mem_merge_projects` | Fusionar nombres de proyecto |
-| `mem_semantic_search` | **Búsqueda semántica por embeddings** (fallback a FTS si no hay embedder) |
+| `mem_semantic_search` | Búsqueda semántica por embeddings |
 
 ## REST API
 
 ```bash
-# Salud
 curl http://localhost:7438/healthz
-
-# Crear API key
 curl -X POST http://localhost:7438/api/v1/keys \
   -H "X-Api-Key: ADMIN_KEY" \
   -d '{"name":"vscode-agent"}'
-
-# Buscar
-curl "http://localhost:7438/api/v1/search?q=postgres" \
-  -H "X-Api-Key: ir_xxx"
-
-# Exportar (migración desde Engram)
-curl http://localhost:7438/api/v1/export -H "X-Api-Key: ir_xxx" > backup.json
-
-# Importar desde Engram
-curl -X POST http://localhost:7438/api/v1/import \
-  -H "X-Api-Key: ir_xxx" \
-  -H "Content-Type: application/json" \
-  --data-binary @engram-export.json
 ```
 
-## Migración desde Engram
+## Migración heredada
 
-```bash
-export IA_RECUERDO_KEY=ir_xxxxx
-bash scripts/migrate-from-engram.sh
-```
+Los scripts `scripts/migrate-from-engram.sh` y `scripts/migrate-engram.py` quedan como legado de transición.
 
-## Búsqueda semántica (pgvector)
+## Notas
 
-Requiere: PostgreSQL con la extensión `pgvector` instalada + proveedor de embeddings.
-
-### Ollama (self-hosted, recomendado)
-
-```bash
-# 1. Instalar Ollama y descargar modelo
-curl -fsSL https://ollama.ai/install.sh | sh
-ollama pull nomic-embed-text  # 274 MB
-
-# 2. Instalar pgvector en Postgres (Debian/Ubuntu)
-apt install postgresql-16-pgvector
-
-# 3. Arrancar IA_Recuerdo con embeddings
-./ia-recuerdo \
-  -db-driver postgres -db-dsn "postgres://..." \
-  -embed-url http://localhost:11434/v1/embeddings \
-  -embed-model nomic-embed-text \
-  -embed-dims 768
-```
-
-### OpenAI
-
-```bash
-./ia-recuerdo \
-  -db-driver postgres -db-dsn "postgres://..." \
-  -embed-url https://api.openai.com/v1/embeddings \
-  -embed-model text-embedding-3-small \
-  -embed-token sk-xxx \
-  -embed-dims 1536
-```
-
-### Usando la herramienta
-
-```json
-{"name": "mem_semantic_search", "arguments": {"query": "error de autenticación en JWT", "project": "mi-proyecto"}}
-```
-
-Si no hay embedder configurado, `mem_semantic_search` hace **fallback automático** a búsqueda FTS.
-
-## Instalación en Proxmox
-
-```bash
-make build-postgres
-scp bin/ia-recuerdo-linux-amd64-postgres root@<HOST>:/tmp/ia-recuerdo-linux-amd64
-bash scripts/install.sh
-```
-
-## Makefile targets
-
-```
-make build          # SQLite, dev
-make build-linux    # Linux amd64, SQLite
-make build-postgres # Linux amd64, PostgreSQL (producción)
-make run            # HTTP :7438 con SQLite
-make run-both       # HTTP + stdio
-make test           # Tests
-make docker-build   # Imagen Docker
-make deploy-k8s     # Kubernetes
-make health         # curl /healthz
-make export         # Exportar todas las observaciones
-make import         # Importar desde JSON
-```
-
----
-
-## Registrar IA_Recuerdo MCP en clientes IA
-
-El servidor MCP de **IA_Recuerdo** se puede conectar desde cualquier agente IA: VS Code, Visual Studio 2022/2026, Claude Code, Cursor, etc. **No requiere autenticación** en el endpoint `/mcp`.
-
-### Crear una API Key (solo para REST API)
-
-El endpoint MCP no necesita autenticación. La API key solo es necesaria para usar la REST API (`/api/v1/*`):
-
-```bash
-./ia-recuerdo -create-token "mi-cliente"
-# → ir_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
----
-
-### VS Code y Visual Studio — archivo de configuración único
-
-Tanto **VS Code** como **Visual Studio 2022/2026** con GitHub Copilot leen el archivo:
-
-```
-%USERPROFILE%\.mcp.json
-```
-
-Añade la entrada `ia-recuerdo` junto a cualquier otro servidor que ya tengas:
-
-```json
-{
-  "inputs": [],
-  "servers": {
-    "ia-recuerdo": {
-      "type": "http",
-      "url": "http://<HOST>:7438/mcp"
-    }
-  }
-}
-```
-
-Reinicia el cliente para cargar la nueva configuración.
-
----
-
-### Verificar conectividad
-
-```bash
-# MCP (sin auth)
-curl -s -X POST http://<HOST>:7438/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}'
-
-# REST API (requiere X-Api-Key)
-curl http://<HOST>:7438/api/v1/search?q=test \
-  -H "X-Api-Key: ir_xxx"
-```
-```
-
-**Ver documentación detallada:** [INSTALAR_MCP_CLIENTE.md](INSTALAR_MCP_CLIENTE.md)
-
----
-
-## Agradecimientos
-
-Este proyecto no existiría sin el trabajo de **Alan Buscaglia** y la comunidad **Gentleman Programming**.
-
-**IA_Recuerdo** es una extensión de [Engram](https://github.com/Gentleman-Programming/engram) — el sistema de memoria persistente para agentes IA que Alan construyó de cero con Go, SQLite y FTS5. Si llegaste hasta aquí, te recomiendo explorar todo el ecosistema que ha creado:
-
-| Proyecto | Descripción |
-|----------|-------------|
-| [Engram](https://github.com/Gentleman-Programming/engram) ⭐ 2.2k | Memoria persistente para agentes IA — la base de este proyecto |
-| [Gentle AI](https://github.com/Gentleman-Programming/gentle-ai) ⭐ 1.6k | Configurador del ecosistema IA completo |
-| [Gentleman Skills](https://github.com/Gentleman-Programming/Gentleman-Skills) | Skills curados para Claude Code, OpenCode, Cursor y más |
-| [Gentleman Guardian Angel](https://github.com/Gentleman-Programming/gentleman-guardian-angel) | Code review con IA, agnóstico de proveedor |
-| [Agent Teams Lite](https://github.com/Gentleman-Programming/agent-teams-lite) | SDD con 9 sub-agentes especializados |
-
-### Seguí a Alan
-
-- 🎥 **YouTube** — [youtube.com/@GentlemanProgramming](https://www.youtube.com/@GentlemanProgramming) — 100K+ suscriptores, tutoriales de arquitectura, IA y desarrollo
-- 🌐 **Web personal** — [alan-buscaglia.vercel.app](https://alan-buscaglia.vercel.app/home)
-- 🔗 **Todos sus links** — [doras.to/gentleman-programming](https://doras.to/gentleman-programming)
-- 🐙 **GitHub** — [github.com/Alan-TheGentleman](https://github.com/Alan-TheGentleman)
-- 📚 **Libro gratuito** — [The Amazing Gentleman Programming Book](https://the-amazing-gentleman-programming-book.vercel.app/) — Clean Architecture, SOLID, TDD
-
-> *"Concepts over code. Foundations over frameworks. We are Tony Stark. AI is Jarvis."*
-> — Alan Buscaglia
-
+- CT204 escucha en `:7438`.
+- La documentación de transición Engram se conserva solo como legado.
