@@ -6,7 +6,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.1
 	github.com/valkey-io/valkey-go v1.0.73
-	modernc.org/sqlite v1.48.1
 )
 
 require (

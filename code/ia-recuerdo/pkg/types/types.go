@@ -63,6 +63,27 @@ type Prompt struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Attachment stores a binary blob linked to an observation.
+type Attachment struct {
+	ID            int64      `json:"id"`
+	ObservationID int64      `json:"observation_id"`
+	Name          string     `json:"name"`
+	Mime          string     `json:"mime"`
+	SizeBytes     int64      `json:"size_bytes"`
+	SHA256        string     `json:"sha256"`
+	Data          []byte     `json:"data,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// Relation links two observations.
+type Relation struct {
+	ID            int64     `json:"id"`
+	FromID        int64     `json:"from_id"`
+	ToID          int64     `json:"to_id"`
+	Type          string    `json:"type"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 // SearchResult wraps an Observation with relevance metadata.
 type SearchResult struct {
 	Observation
