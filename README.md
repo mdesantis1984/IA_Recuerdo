@@ -30,6 +30,20 @@ make build-postgres
 ./ia-recuerdo -transport both -addr :7438 -db-driver postgres -db-dsn "postgres://..."
 ```
 
+### Conexión PostgreSQL
+
+- Host: `postgresql`
+- Puerto: `5432`
+- Base: `ia_recuerdo`
+- Usuario: `ia_recuerdo`
+- SSL: `require`
+
+DSN de referencia:
+
+```bash
+postgres://ia_recuerdo:REDACTED_PASSWORD@CT205_IP:5432/ia_recuerdo?sslmode=disable
+```
+
 ## Configuración MCP en VS Code
 
 ```json

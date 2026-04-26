@@ -2,9 +2,11 @@ package mcp_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -14,7 +16,11 @@ import (
 
 func newTestHandler(t *testing.T) *mcppkg.Handler {
 	t.Helper()
-	s, err := store.New(context.Background(), store.Config{Driver: "sqlite", DSN: ":memory:"})
+	dsn := os.Getenv("IA_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("IA_TEST_PG_DSN not set")
+	}
+	s, err := store.New(context.Background(), store.Config{Driver: "postgres", DSN: dsn})
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
@@ -28,8 +34,20 @@ func newTestHandler(t *testing.T) *mcppkg.Handler {
 
 func TestToolList_Has15Tools(t *testing.T) {
 	tools := mcppkg.ToolList()
-	if len(tools) != 16 {
-		t.Fatalf("expected 16 tools, got %d", len(tools))
+	if len(tools) != 20 {
+		t.Fatalf("expected 20 tools, got %d", len(tools))
+	}
+}
+
+func TestToolList_HasTagFilters(t *testing.T) {
+	for _, tool := range mcppkg.ToolList() {
+		if tool["name"] == "mem_search" || tool["name"] == "mem_context" {
+			schema := tool["inputSchema"].(map[string]interface{})
+			props := schema["properties"].(map[string]interface{})
+			if _, ok := props["tags"]; !ok {
+				t.Fatalf("tool %v missing tags property", tool["name"])
+			}
+		}
 	}
 }
 
@@ -124,6 +142,28 @@ func TestMemSearch(t *testing.T) {
 	count := m["count"].(int)
 	if count == 0 {
 		t.Fatal("expected at least 1 result for 'Kubernetes'")
+	}
+}
+
+func TestMemSearch_WithTags(t *testing.T) {
+	h := newTestHandler(t)
+	ctx := context.Background()
+
+	h.Call(ctx, "mem_save", map[string]interface{}{
+		"title": "Tagged obs", "content": "content", "type": "discovery", "project": "infra", "tags": []interface{}{"pgvector", "db"},
+	})
+
+	result, err := h.Call(ctx, "mem_search", map[string]interface{}{
+		"query": "Tagged",
+		"project": "infra",
+		"tags": []interface{}{"pgvector"},
+	})
+	if err != nil {
+		t.Fatalf("mem_search tags: %v", err)
+	}
+	m := result.(map[string]interface{})
+	if m["count"].(int) == 0 {
+		t.Fatal("expected tagged result")
 	}
 }
 
@@ -296,6 +336,24 @@ func TestMemContext(t *testing.T) {
 	}
 }
 
+func TestMemContext_WithTags(t *testing.T) {
+	h := newTestHandler(t)
+	ctx := context.Background()
+
+	h.Call(ctx, "mem_save", map[string]interface{}{
+		"title": "Ctx tagged", "content": "content", "type": "discovery", "project": "ctx-proj", "tags": []interface{}{"blue"},
+	})
+
+	result, err := h.Call(ctx, "mem_context", map[string]interface{}{"project": "ctx-proj", "tags": []interface{}{"blue"}, "limit": float64(5)})
+	if err != nil {
+		t.Fatalf("mem_context tags: %v", err)
+	}
+	m := result.(map[string]interface{})
+	if m["count"].(int) == 0 {
+		t.Fatal("expected tagged context result")
+	}
+}
+
 func TestMemTimeline(t *testing.T) {
 	h := newTestHandler(t)
 	ctx := context.Background()
@@ -389,6 +447,91 @@ func TestMemCapturePassive_Long(t *testing.T) {
 	}
 }
 
+func TestMemMergeProjects(t *testing.T) {
+	h := newTestHandler(t)
+	ctx := context.Background()
+
+	h.Call(ctx, "mem_save", map[string]interface{}{
+		"title": "Project A", "content": "content", "type": "discovery", "project": "from-proj",
+	})
+
+	result, err := h.Call(ctx, "mem_merge_projects", map[string]interface{}{"from": "from-proj", "to": "to-proj"})
+	if err != nil {
+		t.Fatalf("mem_merge_projects: %v", err)
+	}
+	m := result.(map[string]interface{})
+	if m["status"] != "merged" {
+		t.Fatalf("expected merged, got %v", m["status"])
+	}
+}
+
+func TestMemSaveAttachmentAndList(t *testing.T) {
+	h := newTestHandler(t)
+	ctx := context.Background()
+
+	saved, _ := h.Call(ctx, "mem_save", map[string]interface{}{
+		"title": "Attachment parent", "content": "content", "type": "discovery", "project": "att",
+	})
+	id := saved.(map[string]interface{})["id"].(int64)
+
+	result, err := h.Call(ctx, "mem_save_attachment", map[string]interface{}{
+		"observation_id": float64(id),
+		"name": "note.txt",
+		"mime": "text/plain",
+		"data_b64": base64.StdEncoding.EncodeToString([]byte("hello")),
+	})
+	if err != nil {
+		t.Fatalf("mem_save_attachment: %v", err)
+	}
+	if result.(map[string]interface{})["status"] != "saved" {
+		t.Fatalf("expected saved, got %v", result)
+	}
+
+	list, err := h.Call(ctx, "mem_list_attachments", map[string]interface{}{"observation_id": float64(id)})
+	if err != nil {
+		t.Fatalf("mem_list_attachments: %v", err)
+	}
+	m := list.(map[string]interface{})
+	if m["count"].(int) == 0 {
+		t.Fatal("expected at least one attachment")
+	}
+}
+
+func TestMemSaveRelationAndList(t *testing.T) {
+	h := newTestHandler(t)
+	ctx := context.Background()
+
+	a, _ := h.Call(ctx, "mem_save", map[string]interface{}{
+		"title": "Relation A", "content": "content", "type": "discovery", "project": "rel",
+	})
+	b, _ := h.Call(ctx, "mem_save", map[string]interface{}{
+		"title": "Relation B", "content": "content", "type": "discovery", "project": "rel",
+	})
+	idA := a.(map[string]interface{})["id"].(int64)
+	idB := b.(map[string]interface{})["id"].(int64)
+
+	result, err := h.Call(ctx, "mem_save_relation", map[string]interface{}{
+		"from_id": float64(idA),
+		"to_id": float64(idB),
+		"type": "related",
+	})
+	if err != nil {
+		t.Fatalf("mem_save_relation: %v", err)
+	}
+	if result.(map[string]interface{})["status"] != "saved" {
+		t.Fatalf("expected saved, got %v", result)
+	}
+
+	list, err := h.Call(ctx, "mem_list_relations", map[string]interface{}{"observation_id": float64(idA)})
+	if err != nil {
+		t.Fatalf("mem_list_relations: %v", err)
+	}
+	m := list.(map[string]interface{})
+	if m["count"].(int) == 0 {
+		t.Fatal("expected at least one relation")
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Unknown tool
 // ─────────────────────────────────────────────────────────────────
@@ -402,7 +545,7 @@ func TestCall_UnknownTool(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// mem_semantic_search (falls back to FTS on SQLite / no embedder)
+// mem_semantic_search (falls back to text search when no embedder is configured)
 // ─────────────────────────────────────────────────────────────────
 
 func TestMemSemanticSearch_FallsBackToFTS(t *testing.T) {

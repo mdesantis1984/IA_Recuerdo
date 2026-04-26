@@ -18,6 +18,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	}{
 		{"v1_init", s.v1Init},
 		{"v2_pgvector", s.v2Pgvector},
+		{"v3_content_split", s.v3ContentSplit},
 	}
 
 	for _, m := range migrations {
@@ -81,7 +82,7 @@ func (s *Store) v1Init(ctx context.Context, tx *sql.Tx) error {
 			`CREATE TABLE IF NOT EXISTS observations (
 				id             BIGSERIAL    PRIMARY KEY,
 				title          TEXT         NOT NULL,
-				content        TEXT         NOT NULL,
+				content        TEXT         NOT NULL DEFAULT '',
 				type           TEXT         NOT NULL DEFAULT 'discovery',
 				project        TEXT         NOT NULL DEFAULT 'default',
 				scope          TEXT         NOT NULL DEFAULT 'project',
@@ -102,6 +103,12 @@ func (s *Store) v1Init(ctx context.Context, tx *sql.Tx) error {
 			// Full-text search index via tsvector
 			`CREATE INDEX IF NOT EXISTS idx_obs_fts ON observations
 				USING GIN(to_tsvector('english', title || ' ' || content))`,
+			`CREATE TABLE IF NOT EXISTS observation_content (
+				observation_id BIGINT      PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+				content        TEXT        NOT NULL,
+				created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+				updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)`,
 			`CREATE TABLE IF NOT EXISTS sessions (
 				id         TEXT         PRIMARY KEY,
 				project    TEXT         NOT NULL DEFAULT 'default',
@@ -119,6 +126,27 @@ func (s *Store) v1Init(ctx context.Context, tx *sql.Tx) error {
 				created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_prompts_project ON prompts(project)`,
+			`CREATE TABLE IF NOT EXISTS attachments (
+				id             BIGSERIAL   PRIMARY KEY,
+				observation_id BIGINT      NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+				name           TEXT        NOT NULL,
+				mime           TEXT        NOT NULL DEFAULT 'application/octet-stream',
+				size_bytes     BIGINT      NOT NULL DEFAULT 0,
+				sha256         TEXT        NOT NULL DEFAULT '',
+				data           BYTEA       NOT NULL,
+				created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_attachments_observation ON attachments(observation_id)`,
+			`CREATE TABLE IF NOT EXISTS observation_relations (
+				id         BIGSERIAL   PRIMARY KEY,
+				from_id    BIGINT      NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+				to_id      BIGINT      NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+				type       TEXT        NOT NULL DEFAULT 'related',
+				created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+				UNIQUE(from_id, to_id, type)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_observation_relations_from ON observation_relations(from_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_observation_relations_to ON observation_relations(to_id)`,
 			`CREATE TABLE IF NOT EXISTS api_keys (
 				id         TEXT    PRIMARY KEY,
 				name       TEXT    NOT NULL,
@@ -135,7 +163,7 @@ func (s *Store) v1Init(ctx context.Context, tx *sql.Tx) error {
 			`CREATE TABLE IF NOT EXISTS observations (
 				id              INTEGER PRIMARY KEY AUTOINCREMENT,
 				title           TEXT    NOT NULL,
-				content         TEXT    NOT NULL,
+				content         TEXT    NOT NULL DEFAULT '',
 				type            TEXT    NOT NULL DEFAULT 'discovery',
 				project         TEXT    NOT NULL DEFAULT 'default',
 				scope           TEXT    NOT NULL DEFAULT 'project',
@@ -183,6 +211,37 @@ func (s *Store) v1Init(ctx context.Context, tx *sql.Tx) error {
 				content    TEXT    NOT NULL,
 				created_at INTEGER NOT NULL
 			)`,
+			`CREATE TABLE IF NOT EXISTS attachments (
+				id             INTEGER PRIMARY KEY AUTOINCREMENT,
+				observation_id INTEGER NOT NULL,
+				name           TEXT    NOT NULL,
+				mime           TEXT    NOT NULL DEFAULT 'application/octet-stream',
+				size_bytes     INTEGER NOT NULL DEFAULT 0,
+				sha256         TEXT    NOT NULL DEFAULT '',
+				data           BLOB    NOT NULL,
+				created_at     INTEGER NOT NULL,
+				FOREIGN KEY(observation_id) REFERENCES observations(id) ON DELETE CASCADE
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_attachments_observation ON attachments(observation_id)`,
+			`CREATE TABLE IF NOT EXISTS observation_content (
+				observation_id INTEGER PRIMARY KEY,
+				content        TEXT    NOT NULL,
+				created_at     INTEGER NOT NULL,
+				updated_at     INTEGER NOT NULL,
+				FOREIGN KEY(observation_id) REFERENCES observations(id) ON DELETE CASCADE
+			)`,
+			`CREATE TABLE IF NOT EXISTS observation_relations (
+				id         INTEGER PRIMARY KEY AUTOINCREMENT,
+				from_id    INTEGER NOT NULL,
+				to_id      INTEGER NOT NULL,
+				type       TEXT    NOT NULL DEFAULT 'related',
+				created_at INTEGER NOT NULL,
+				UNIQUE(from_id, to_id, type),
+				FOREIGN KEY(from_id) REFERENCES observations(id) ON DELETE CASCADE,
+				FOREIGN KEY(to_id) REFERENCES observations(id) ON DELETE CASCADE
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_observation_relations_from ON observation_relations(from_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_observation_relations_to ON observation_relations(to_id)`,
 			`CREATE TABLE IF NOT EXISTS api_keys (
 				id         TEXT    PRIMARY KEY,
 				name       TEXT    NOT NULL,
@@ -205,11 +264,7 @@ func (s *Store) v1Init(ctx context.Context, tx *sql.Tx) error {
 }
 
 // v2Pgvector adds vector similarity search support (Postgres only).
-// On SQLite this migration is a no-op so the version is still recorded.
 func (s *Store) v2Pgvector(ctx context.Context, tx *sql.Tx) error {
-	if !s.pg() {
-		return nil // SQLite: no-op, pgvector is a Postgres extension
-	}
 	stmts := []string{
 		// Require the pgvector extension (must be pre-installed on the PG server).
 		`CREATE EXTENSION IF NOT EXISTS vector`,
@@ -228,6 +283,32 @@ func (s *Store) v2Pgvector(ctx context.Context, tx *sql.Tx) error {
 	for _, stmt := range stmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("v2_pgvector: %w\nSQL: %.200s", err, stmt)
+		}
+	}
+	return nil
+}
+
+// v3ContentSplit moves heavy observation content into its own table and trims the inline copy.
+func (s *Store) v3ContentSplit(ctx context.Context, tx *sql.Tx) error {
+	var stmts []string
+	if s.pg() {
+		stmts = []string{
+			`INSERT INTO observation_content(observation_id, content, created_at, updated_at)
+			 SELECT id, content, created_at, updated_at
+			 FROM observations
+			 ON CONFLICT (observation_id) DO NOTHING`,
+			`UPDATE observations SET content = LEFT(content, 300) WHERE content <> LEFT(content, 300)`,
+		}
+	} else {
+		stmts = []string{
+			`INSERT OR IGNORE INTO observation_content(observation_id, content, created_at, updated_at)
+			 SELECT id, content, created_at, updated_at FROM observations`,
+			`UPDATE observations SET content = substr(content, 1, 300) WHERE content <> substr(content, 1, 300)`,
+		}
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("v3_content_split: %w\nSQL: %.200s", err, stmt)
 		}
 	}
 	return nil

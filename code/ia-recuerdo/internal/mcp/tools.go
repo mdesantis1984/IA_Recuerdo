@@ -4,6 +4,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -65,6 +66,14 @@ func (h *Handler) Call(ctx context.Context, tool string, args map[string]interfa
 		return h.memCapturePassive(ctx, args)
 	case "mem_merge_projects":
 		return h.memMergeProjects(ctx, args)
+	case "mem_save_attachment":
+		return h.memSaveAttachment(ctx, args)
+	case "mem_list_attachments":
+		return h.memListAttachments(ctx, args)
+	case "mem_save_relation":
+		return h.memSaveRelation(ctx, args)
+	case "mem_list_relations":
+		return h.memListRelations(ctx, args)
 	case "mem_semantic_search":
 		return h.memSemanticSearch(ctx, args)
 	default:
@@ -107,6 +116,7 @@ func ToolList() []map[string]interface{} {
 		tool("mem_search", "Full-text search across all memories",
 			prop("query", "string", "Search query"),
 			prop("project", "string", "Filter by project (optional)"),
+			prop("tags", "array", "Optional string tags"),
 			prop("limit", "integer", "Max results (default 10)"),
 			nil,
 			[]string{"query"},
@@ -122,6 +132,7 @@ func ToolList() []map[string]interface{} {
 		),
 		tool("mem_context", "Get recent context from previous sessions",
 			prop("project", "string", "Project name"),
+			prop("tags", "array", "Optional string tags"),
 			prop("limit", "integer", "Max observations (default 20)"),
 			nil, nil,
 		),
@@ -166,6 +177,31 @@ func ToolList() []map[string]interface{} {
 			prop("to", "string", "Target canonical project name"),
 			nil,
 			[]string{"from", "to"},
+		),
+		tool("mem_save_attachment", "Save a binary attachment linked to an observation",
+			prop("observation_id", "integer", "Observation ID"),
+			prop("name", "string", "Attachment name"),
+			prop("mime", "string", "MIME type"),
+			prop("data_b64", "string", "Base64-encoded content"),
+			nil,
+			[]string{"observation_id", "name", "data_b64"},
+		),
+		tool("mem_list_attachments", "List attachments for an observation",
+			prop("observation_id", "integer", "Observation ID"),
+			nil,
+			[]string{"observation_id"},
+		),
+		tool("mem_save_relation", "Save a relation between two observations",
+			prop("from_id", "integer", "Source observation ID"),
+			prop("to_id", "integer", "Target observation ID"),
+			prop("type", "string", "Relation type"),
+			nil,
+			[]string{"from_id", "to_id"},
+		),
+		tool("mem_list_relations", "List relations for an observation",
+			prop("observation_id", "integer", "Observation ID"),
+			nil,
+			[]string{"observation_id"},
 		),
 		tool("mem_semantic_search", "Semantic similarity search using vector embeddings (requires embedding provider)",
 			prop("query", "string", "Natural language query to search by meaning"),
@@ -288,6 +324,7 @@ func (h *Handler) memSearch(ctx context.Context, args map[string]interface{}) (i
 	query := str(args, "query")
 	project := str(args, "project")
 	limit := int(num(args, "limit"))
+	tags := stringSlice(args, "tags")
 
 	// Cache lookup (fingerprint: query|project|limit)
 	fp := fmt.Sprintf("%s|%s|%d", query, project, limit)
@@ -296,7 +333,7 @@ func (h *Handler) memSearch(ctx context.Context, args map[string]interface{}) (i
 		return cached, nil
 	}
 
-	results, err := h.store.Search(ctx, query, project, limit)
+	results, err := h.store.SearchFiltered(ctx, query, project, tags, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -345,6 +382,7 @@ func (h *Handler) memContext(ctx context.Context, args map[string]interface{}) (
 		limit = 20
 	}
 	project := strDefault(args, "project", "default")
+	tags := stringSlice(args, "tags")
 
 	// Cache lookup (TTL 1h, invalidated on mem_save)
 	var cached map[string]interface{}
@@ -352,7 +390,7 @@ func (h *Handler) memContext(ctx context.Context, args map[string]interface{}) (
 		return cached, nil
 	}
 
-	obs, err := h.store.RecentContext(ctx, project, limit)
+	obs, err := h.store.RecentContextFiltered(ctx, project, tags, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -467,12 +505,15 @@ func (h *Handler) memMergeProjects(ctx context.Context, args map[string]interfac
 	if from == "" || to == "" {
 		return nil, fmt.Errorf("from and to are required")
 	}
-	// This is an admin operation; delegate to store when implemented
+	count, err := h.store.MergeProjects(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]interface{}{
-		"status":  "merge_requested",
+		"status":  "merged",
 		"from":    from,
 		"to":      to,
-		"message": "Project merge is processed asynchronously",
+		"count":   count,
 	}, nil
 }
 
@@ -489,10 +530,6 @@ func (h *Handler) memSemanticSearch(ctx context.Context, args map[string]interfa
 	}
 
 	results, err := h.store.SemanticSearch(ctx, emb, project, limit)
-	if err == store.ErrNotSupported {
-		// SQLite: fall back to FTS.
-		return h.memSearch(ctx, args)
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -514,6 +551,66 @@ func (h *Handler) memSemanticSearch(ctx context.Context, args map[string]interfa
 		"count":   len(out),
 		"mode":    "semantic",
 	}, nil
+}
+
+func (h *Handler) memSaveAttachment(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	observationID := int64(num(args, "observation_id"))
+	if observationID <= 0 {
+		return nil, fmt.Errorf("observation_id is required and must be > 0")
+	}
+	name := str(args, "name")
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	mime := strDefault(args, "mime", "application/octet-stream")
+	dataB64 := str(args, "data_b64")
+	if dataB64 == "" {
+		return nil, fmt.Errorf("data_b64 is required")
+	}
+	data, err := base64.StdEncoding.DecodeString(dataB64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base64 data")
+	}
+	att, err := h.store.SaveAttachment(ctx, observationID, name, mime, data)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"status": "saved", "id": att.ID, "observation_id": att.ObservationID, "sha256": att.SHA256}, nil
+}
+
+func (h *Handler) memListAttachments(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	observationID := int64(num(args, "observation_id"))
+	if observationID <= 0 {
+		return nil, fmt.Errorf("observation_id is required and must be > 0")
+	}
+	items, err := h.store.ListAttachments(ctx, observationID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"attachments": items, "count": len(items)}, nil
+}
+
+func (h *Handler) memSaveRelation(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	fromID := int64(num(args, "from_id"))
+	toID := int64(num(args, "to_id"))
+	relType := strDefault(args, "type", "related")
+	rel, err := h.store.SaveRelation(ctx, fromID, toID, relType)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"status": "saved", "id": rel.ID, "from_id": rel.FromID, "to_id": rel.ToID, "type": rel.Type}, nil
+}
+
+func (h *Handler) memListRelations(ctx context.Context, args map[string]interface{}) (interface{}, error) {
+	id := int64(num(args, "observation_id"))
+	if id <= 0 {
+		return nil, fmt.Errorf("observation_id is required and must be > 0")
+	}
+	items, err := h.store.ListRelations(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"relations": items, "count": len(items)}, nil
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -602,6 +699,27 @@ func boolArg(args map[string]interface{}, key string) bool {
 		}
 	}
 	return false
+}
+
+func stringSlice(args map[string]interface{}, key string) []string {
+	v, ok := args[key]
+	if !ok || v == nil {
+		return nil
+	}
+	switch raw := v.(type) {
+	case []string:
+		return raw
+	case []interface{}:
+		out := make([]string, 0, len(raw))
+		for _, item := range raw {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func min(a, b int) int {
