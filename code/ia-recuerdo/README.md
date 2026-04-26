@@ -2,31 +2,16 @@
 
 Sistema de memoria persistente centralizado para agentes IA.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](https://golang.org)
-[![MCP](https://img.shields.io/badge/MCP-2024--11--05-blueviolet)](https://spec.modelcontextprotocol.io/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-336791?logo=postgresql)](https://github.com/pgvector/pgvector)
-
 ## Resumen
 
-- Transporte MCP por `stdio` y `HTTP`.
-- REST API para observaciones, sesiones, prompts, exportación y métricas.
-- PostgreSQL como persistencia única.
-- `pgvector` para búsqueda semántica.
-- Caché operativa para contexto y búsquedas.
-- Filtros por `tags` en búsqueda y contexto.
-- Consolidación de proyectos duplicados.
-- Métricas HTTP básicas en `/metrics`.
-- Adjuntos/binarios por observación.
-- Relaciones explícitas entre observaciones.
-- Contenido pesado separado de metadata.
-
-## Inicio rápido
-
-```bash
-make build-postgres
-./ia-recuerdo -transport both -addr :7438 -db-driver postgres -db-dsn "postgres://..."
-```
+- MCP por `stdio` y `HTTP`
+- REST API para observaciones, sesiones, prompts, exportación y métricas
+- PostgreSQL como persistencia principal
+- `pgvector` para búsqueda semántica
+- Filtros por `tags`
+- Consolidación de proyectos
+- Adjuntos y relaciones entre observaciones
+- Contenido pesado separado de metadata
 
 ## Configuración MCP
 
@@ -34,14 +19,13 @@ make build-postgres
 {
   "servers": {
     "ia-recuerdo": {
-      "type": "http",
       "url": "http://<HOST>:7438/mcp"
     }
   }
 }
 ```
 
-## Herramientas MCP
+## MCP tools
 
 - `mem_save`
 - `mem_update`
@@ -58,18 +42,11 @@ make build-postgres
 - `mem_stats`
 - `mem_capture_passive`
 - `mem_merge_projects`
+- `mem_semantic_search`
 - `mem_save_attachment`
 - `mem_list_attachments`
 - `mem_save_relation`
 - `mem_list_relations`
-- `mem_semantic_search`
-
-## Modelo de datos
-
-- `observations`: metadata ligera y preview de texto.
-- `observation_content`: contenido textual completo separado.
-- `attachments`: binarios asociados a observaciones.
-- `observation_relations`: vínculos entre observaciones.
 
 ## REST API
 
@@ -90,30 +67,10 @@ make build-postgres
 
 ## Modelo de datos
 
-- `observations`: metadata ligera de cada memoria.
-- `observation_content`: contenido largo separado de la metadata.
-- `attachments`: binarios y adjuntos por observación.
-- `observation_relations`: vínculos explícitos entre observaciones.
-- `sessions`: historial de sesiones de agente.
-- `prompts`: prompts reutilizables.
-- `api_keys`: claves opacas para acceso REST.
-
-## Mejoras recientes
-
-- Búsqueda y contexto con filtro opcional por `tags`.
-- `mem_merge_projects` para consolidar variantes de proyecto.
-- `mem_save_attachment` y `mem_list_attachments`.
-- `mem_save_relation` y `mem_list_relations`.
-- `mem_semantic_search` con fallback a búsqueda textual.
-- `/metrics` para observabilidad mínima.
-- Separación de contenido pesado en tabla dedicada.
-
-## Búsqueda semántica
-
-Requiere PostgreSQL con `pgvector` habilitado y un provider de embeddings.
-
-Si no hay provider de embeddings, `mem_semantic_search` degrada a `mem_search` automáticamente.
-
-## Documentación
-
-- `IA_Recuerdo.md` en la raíz del workspace contiene el SDD completo.
+- `observations`: metadata ligera
+- `observation_content`: contenido completo
+- `attachments`: binarios por observación
+- `observation_relations`: vínculos explícitos
+- `sessions`: historial de sesiones
+- `prompts`: prompts reutilizables
+- `api_keys`: claves de acceso REST

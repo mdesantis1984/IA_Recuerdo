@@ -6,9 +6,9 @@
 # Transport
 # ──────────────────────────────────────────────────────────────
 # Opciones: stdio | http | both
-# stdio = acceso MCP vía stdin/stdout (compatible con MCP spec)
-# http  = acceso remoto sin instalar binario (DIFERENCIADOR CLAVE)
-# both  = ambos simultáneamente (recomendado en producción)
+# stdio = acceso MCP vía stdin/stdout
+# http  = acceso remoto sin instalar binario
+# both  = ambos simultáneamente
 transport: both
 addr: ":7438"      # Puerto IA_Recuerdo
 
@@ -17,14 +17,14 @@ addr: ":7438"      # Puerto IA_Recuerdo
 # ──────────────────────────────────────────────────────────────
 db:
   driver: postgres
-  dsn: ia-recuerdo.db
+  dsn: "postgres://ia_recuerdo:PASS@localhost:5432/ia_recuerdo?sslmode=require"
 
   # producción (compilar con -tags postgres):
   # driver: postgres
   # dsn: "postgres://ia_recuerdo:PASS@localhost:5432/ia_recuerdo?sslmode=require"
 
 # ──────────────────────────────────────────────────────────────
-# Caché Valkey (opcional — Redis compatible)
+# Caché Valkey (opcional)
 # ──────────────────────────────────────────────────────────────
 # Si está vacío, el caché se desactiva sin error
 valkey: ""          # "localhost:6379" para habilitar
