@@ -16,9 +16,8 @@ addr: ":7438"      # Puerto IA_Recuerdo
 # Base de datos
 # ──────────────────────────────────────────────────────────────
 db:
-  # dev/local: sqlite (sin dependencias)
-  driver: sqlite
-  dsn: ia-recuerdo.db
+  driver: postgres
+  dsn: "postgres://ia_recuerdo:PASS@localhost:5432/ia_recuerdo?sslmode=require"
 
   # producción (compilar con -tags postgres):
   # driver: postgres

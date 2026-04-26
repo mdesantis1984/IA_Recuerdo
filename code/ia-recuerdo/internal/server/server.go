@@ -48,31 +48,36 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 
 	// Auth-protected REST API
-	authed := s.authMiddleware
+	read := s.authMiddleware("read")
+	write := s.authMiddleware("write")
+	admin := s.authMiddleware("admin")
 
 	// Observations
-	s.mux.HandleFunc("GET /api/v1/observations", authed(s.listObservations))
-	s.mux.HandleFunc("POST /api/v1/observations", authed(s.createObservation))
-	s.mux.HandleFunc("GET /api/v1/observations/{id}", authed(s.getObservation))
-	s.mux.HandleFunc("DELETE /api/v1/observations/{id}", authed(s.deleteObservation))
+	s.mux.HandleFunc("GET /api/v1/observations", read(s.listObservations))
+	s.mux.HandleFunc("POST /api/v1/observations", write(s.createObservation))
+	s.mux.HandleFunc("GET /api/v1/observations/{id}", read(s.getObservation))
+	s.mux.HandleFunc("DELETE /api/v1/observations/{id}", write(s.deleteObservation))
 
 	// Context (recent session observations)
-	s.mux.HandleFunc("GET /api/v1/context", authed(s.getContext))
+	s.mux.HandleFunc("GET /api/v1/context", read(s.getContext))
 
 	// Search
-	s.mux.HandleFunc("GET /api/v1/search", authed(s.searchObservations))
+	s.mux.HandleFunc("GET /api/v1/search", read(s.searchObservations))
 
 	// Stats
-	s.mux.HandleFunc("GET /api/v1/stats", authed(s.getStats))
+	s.mux.HandleFunc("GET /api/v1/stats", read(s.getStats))
+
+	// Metrics
+	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 
 	// Import / Export
-	s.mux.HandleFunc("GET /api/v1/export", authed(s.exportAll))
-	s.mux.HandleFunc("POST /api/v1/import", authed(s.importAll))
+	s.mux.HandleFunc("GET /api/v1/export", read(s.exportAll))
+	s.mux.HandleFunc("POST /api/v1/import", write(s.importAll))
 
 	// API keys (admin) — POST is bootstrap-aware (allows first key without auth)
-	s.mux.HandleFunc("GET /api/v1/keys", authed(s.listKeys))
+	s.mux.HandleFunc("GET /api/v1/keys", admin(s.listKeys))
 	s.mux.HandleFunc("POST /api/v1/keys", s.createKey)        // bootstrap: no auth if 0 keys
-	s.mux.HandleFunc("DELETE /api/v1/keys/{id}", authed(s.revokeKey))
+	s.mux.HandleFunc("DELETE /api/v1/keys/{id}", admin(s.revokeKey))
 }
 
 // Start runs the HTTP server. Blocks until ctx is cancelled.
@@ -101,26 +106,37 @@ func (s *Server) Start(ctx context.Context) error {
 // Auth middleware
 // ─────────────────────────────────────────────────────────────────
 
-func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		key := r.Header.Get("X-Api-Key")
-		if key == "" {
-			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-				key = strings.TrimPrefix(auth, "Bearer ")
+func (s *Server) authMiddleware(requiredScopes ...string) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !s.authorizeRequest(w, r, requiredScopes...) {
+				return
 			}
+			next(w, r)
 		}
-		if key == "" {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing API key"})
-			return
-		}
-		hash := hashKey(key)
-		valid, err := s.store.ValidateAPIKey(r.Context(), hash)
-		if err != nil || !valid {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid API key"})
-			return
-		}
-		next(w, r)
 	}
+}
+
+func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, requiredScopes ...string) bool {
+	key := extractKey(r)
+	if key == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing_credentials"})
+		return false
+	}
+	record, err := s.store.LookupAPIKeyByHash(r.Context(), hashKey(key))
+	if err != nil || record == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_credentials"})
+		return false
+	}
+	if record.Revoked {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "revoked_credentials"})
+		return false
+	}
+	if len(requiredScopes) > 0 && !store.HasScopes(record.Scopes, requiredScopes...) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient_scope"})
+		return false
+	}
+	return true
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -250,6 +266,20 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	st, err := s.store.Stats(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	fmt.Fprintf(w, "ia_recuerdo_up 1\n")
+	fmt.Fprintf(w, "ia_recuerdo_total_observations %d\n", st.TotalObservations)
+	fmt.Fprintf(w, "ia_recuerdo_total_sessions %d\n", st.TotalSessions)
+	fmt.Fprintf(w, "ia_recuerdo_total_prompts %d\n", st.TotalPrompts)
+	fmt.Fprintf(w, "ia_recuerdo_total_projects %d\n", st.TotalProjects)
+}
+
 // exportAll dumps all observations as JSON.
 func (s *Server) exportAll(w http.ResponseWriter, r *http.Request) {
 	obs, err := s.store.ListAll(r.Context())
@@ -308,21 +338,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(keys) > 0 {
-		// Require auth — reuse middleware logic inline.
-		key := r.Header.Get("X-Api-Key")
-		if key == "" {
-			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-				key = strings.TrimPrefix(auth, "Bearer ")
-			}
-		}
-		if key == "" {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing API key"})
-			return
-		}
-		hash := hashKey(key)
-		valid, verr := s.store.ValidateAPIKey(r.Context(), hash)
-		if verr != nil || !valid {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid API key"})
+		if !s.authorizeRequest(w, r, "admin") {
 			return
 		}
 	}
@@ -383,6 +399,17 @@ func generateAPIKey() (raw, hash string, err error) {
 func hashKey(key string) string {
 	h := sha256.Sum256([]byte(key))
 	return fmt.Sprintf("%x", h)
+}
+
+func extractKey(r *http.Request) string {
+	key := r.Header.Get("X-Api-Key")
+	if key != "" {
+		return key
+	}
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimPrefix(auth, "Bearer ")
+	}
+	return ""
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
