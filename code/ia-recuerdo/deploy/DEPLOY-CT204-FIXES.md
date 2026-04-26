@@ -3,6 +3,8 @@
 Registro de fallos encontrados durante el primer deploy de `ia-recuerdo` en un LXC Debian 12.
 Los comandos usan `pct exec <CT_ID>` — reemplaza `<CT_ID>` con el ID real de tu contenedor Proxmox.
 
+> Documento histórico. El estado actual de CT204 ya está estabilizado y no depende de estos workarounds.
+
 ---
 
 ## 1. PostgreSQL — Fallo de autenticación (`password authentication failed`)
@@ -117,8 +119,7 @@ ExecStart=/opt/ia-recuerdo/ia-recuerdo \
 ```
 
 > **Lección**: `transport=both` (HTTP + MCP stdio) solo es útil cuando otro proceso mantiene
-> el pipe stdin abierto (ej: un agente IA conectado). En systemd, usar siempre `transport=http`.
-> El MCP stdio se puede exponer por separado con un socat/proxy si se necesita.
+> el pipe stdin abierto (ej: un agente IA conectado). En systemd, usar `transport=http`.
 
 ---
 
@@ -133,6 +134,6 @@ ExecStart=/opt/ia-recuerdo/ia-recuerdo \
 | pg_hba auth | `md5` para 127.0.0.1/32 |
 | DB encoding | SQL_ASCII (locale C — sin locale instalado) |
 | Binario | `/opt/ia-recuerdo/ia-recuerdo` (-tags postgres) |
-| Transport | `http` (no `both`) |
+| Transport | `http` para systemd, `both` solo para desarrollo |
 | Puerto | `:7438` |
 | Healthz | `http://<CT_IP>:7438/healthz` → `{"status":"ok"}` |
