@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# migrate-from-engram.sh — Migra TODO el historial de Engram a IA_Recuerdo
+# LEGACY: migrate-from-engram.sh — Migra TODO el historial de Engram a IA_Recuerdo
+# Conservado solo como referencia histórica de transición.
 #
 # Prerequisitos:
 #   - engram corriendo en :7437
@@ -22,7 +23,7 @@ IA_ADDR="${IA_ADDR:-http://localhost:7438}"
 IA_KEY="${IA_RECUERDO_KEY:?IA_RECUERDO_KEY must be set}"
 EXPORT_FILE="${TMPDIR:-/tmp}/engram-export-$(date +%Y%m%d-%H%M%S).json"
 
-echo "=== Migración Engram → IA_Recuerdo ==="
+echo "=== LEGACY Migración Engram → IA_Recuerdo ==="
 echo "Engram: $ENGRAM_ADDR"
 echo "IA_Recuerdo: $IA_ADDR"
 echo ""

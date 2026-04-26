@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-migrate-engram.py — Migra datos de Engram (SQLite) a IA_Recuerdo (PostgreSQL)
+LEGACY: migrate-engram.py — Migra datos de Engram (SQLite) a IA_Recuerdo (PostgreSQL)
+
+Conservado solo como referencia histórica de transición.
 
 Uso:
     python3 migrate-engram.py <ruta_a_engram.db> <postgres_dsn>
