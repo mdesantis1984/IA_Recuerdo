@@ -10,6 +10,7 @@ Documentar la transición de IA_Recuerdo hacia PostgreSQL en CT204.
 - PostgreSQL corre aparte en la infraestructura local
 - El servicio usa PostgreSQL como backend principal
 - Los scripts heredados de migración quedaron fuera del flujo productivo
+- La conexión productiva de CT204 apunta por IP directa a CT205 (`10.0.0.205`), no por DNS
 
 ## Notas operativas
 
@@ -17,6 +18,8 @@ Documentar la transición de IA_Recuerdo hacia PostgreSQL en CT204.
 - La conexión a base de datos debe apuntar a PostgreSQL real
 - Los datos pesados viven en tablas separadas
 - El despliegue productivo debe validarse con `healthz` y pruebas de búsqueda
+- El servicio systemd debe usar `-transport http` en CT204
+- `healthz` y `stats` están operativos sobre el servicio desplegado
 
 ## Verificación
 

@@ -28,6 +28,8 @@ IA_Recuerdo es el servicio de memoria de la infraestructura IA local. Expone MCP
 - Búsqueda semántica con `pgvector`
 - Adjuntos y relaciones habilitados
 - Contenido pesado separado de metadata
+- CT204 usa IP directa a CT205 (`10.0.0.205`) para la base de datos
+- El servicio productivo corre con `-transport http`
 
 ## Flujo GitFlow
 
