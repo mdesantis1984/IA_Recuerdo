@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"crypto/sha256"
 	"encoding/hex"
+	"unicode/utf8"
 	"fmt"
 	"log"
 	"strings"
@@ -249,7 +250,7 @@ func (s *Store) SearchFiltered(ctx context.Context, query, project string, tags 
 
 func (s *Store) searchPostgres(ctx context.Context, query, project string, tags []string, limit int) ([]types.SearchResult, error) {
 	var args []interface{}
-	where := "deleted_at IS NULL"
+	where := "observations.deleted_at IS NULL"
 	ph := 1
 	contentExpr := "COALESCE(oc.content, observations.content)"
 
@@ -258,15 +259,15 @@ func (s *Store) searchPostgres(ctx context.Context, query, project string, tags 
 	orderBy := "last_seen_at DESC"
 	if query != "" {
 		tsquery := strings.Join(strings.Fields(query), " & ")
-		where += fmt.Sprintf(" AND to_tsvector('english', title||' '||%s) @@ to_tsquery('english', $%d)", contentExpr, ph)
+		where += fmt.Sprintf(" AND to_tsvector('english', observations.title||' '||%s) @@ to_tsquery('english', $%d)", contentExpr, ph)
 		args = append(args, tsquery)
-		rankExpr = fmt.Sprintf("ts_rank(to_tsvector('english', title||' '||%s), to_tsquery('english', $1)) AS rank", contentExpr)
+		rankExpr = fmt.Sprintf("ts_rank(to_tsvector('english', observations.title||' '||%s), to_tsquery('english', $1)) AS rank", contentExpr)
 		orderBy = "rank DESC"
 		ph++
 	}
 
 	if project != "" {
-		where += fmt.Sprintf(" AND project=$%d", ph)
+		where += fmt.Sprintf(" AND observations.project=$%d", ph)
 		args = append(args, project)
 		ph++
 	}
@@ -278,7 +279,7 @@ func (s *Store) searchPostgres(ctx context.Context, query, project string, tags 
 		left(%s, 300) AS snippet
 		FROM observations
 		LEFT JOIN observation_content oc ON oc.observation_id = observations.id WHERE %s
-		ORDER BY %s LIMIT $%d`, obsColumns(), rankExpr, contentExpr, where, orderBy, ph)
+		ORDER BY %s LIMIT $%d`, obsColumnsAlias("observations"), rankExpr, contentExpr, where, orderBy, ph)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -693,7 +694,7 @@ func (s *Store) ListAttachments(ctx context.Context, observationID int64) ([]typ
 	var q string
 	var args []interface{}
 	if s.pg() {
-		q = `SELECT id, observation_id, name, mime, size_bytes, sha256, created_at FROM attachments WHERE observation_id=$1 ORDER BY id`
+		q = `SELECT id, observation_id, name, mime, size_bytes, sha256, created_at FROM public.attachments WHERE observation_id=$1 ORDER BY id`
 		args = []interface{}{observationID}
 	} else {
 		q = `SELECT id, observation_id, name, mime, size_bytes, sha256, created_at FROM attachments WHERE observation_id=? ORDER BY id`
@@ -761,7 +762,7 @@ func (s *Store) ListRelations(ctx context.Context, observationID int64) ([]types
 	var q string
 	var args []interface{}
 	if s.pg() {
-		q = `SELECT id, from_id, to_id, type, created_at FROM observation_relations WHERE from_id=$1 OR to_id=$1 ORDER BY id`
+		q = `SELECT id, from_id, to_id, type, created_at FROM public.observation_relations WHERE from_id=$1 OR to_id=$1 ORDER BY id`
 		args = []interface{}{observationID}
 	} else {
 		q = `SELECT id, from_id, to_id, type, created_at FROM observation_relations WHERE from_id=? OR to_id=? ORDER BY id`
@@ -889,10 +890,18 @@ func (s *Store) scanOneObs(rows *sql.Rows, extra ...interface{}) (*types.Observa
 }
 
 func previewContent(content string) string {
-	if len(content) > 300 {
-		return content[:300]
+	content = strings.ToValidUTF8(content, "")
+	if utf8.RuneCountInString(content) <= 300 {
+		return content
 	}
-	return content
+	var b strings.Builder
+	for i, r := range content {
+		if i >= 300 {
+			break
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func (s *Store) saveObservationContent(ctx context.Context, id int64, content string, now time.Time) error {
@@ -954,11 +963,11 @@ func (s *Store) SemanticSearch(ctx context.Context, embedding []float32, project
 
 	var args []interface{}
 	args = append(args, vectorToString(embedding)) // $1
-	where := "deleted_at IS NULL AND embedding IS NOT NULL"
+	where := "observations.deleted_at IS NULL AND observations.embedding IS NOT NULL"
 	ph := 2
 
 	if project != "" {
-		where += fmt.Sprintf(" AND project=$%d", ph)
+		where += fmt.Sprintf(" AND observations.project=$%d", ph)
 		args = append(args, project)
 		ph++
 	}
@@ -971,7 +980,7 @@ func (s *Store) SemanticSearch(ctx context.Context, embedding []float32, project
 		LEFT JOIN observation_content oc ON oc.observation_id = observations.id
 		WHERE %s
 		ORDER BY embedding <=> $1::vector
-		LIMIT $%d`, obsColumns(), where, ph)
+		LIMIT $%d`, obsColumnsAlias("observations"), where, ph)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {

@@ -19,6 +19,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		{"v1_init", s.v1Init},
 		{"v2_pgvector", s.v2Pgvector},
 		{"v3_content_split", s.v3ContentSplit},
+		{"v4_relations_and_attachments", s.v4RelationsAndAttachments},
+		{"v5_repair_text_encoding", s.v5RepairTextEncoding},
 	}
 
 	for _, m := range migrations {
@@ -293,6 +295,12 @@ func (s *Store) v3ContentSplit(ctx context.Context, tx *sql.Tx) error {
 	var stmts []string
 	if s.pg() {
 		stmts = []string{
+			`CREATE TABLE IF NOT EXISTS observation_content (
+				observation_id BIGINT      PRIMARY KEY REFERENCES observations(id) ON DELETE CASCADE,
+				content        TEXT        NOT NULL,
+				created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+				updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)`,
 			`INSERT INTO observation_content(observation_id, content, created_at, updated_at)
 			 SELECT id, content, created_at, updated_at
 			 FROM observations
@@ -301,6 +309,13 @@ func (s *Store) v3ContentSplit(ctx context.Context, tx *sql.Tx) error {
 		}
 	} else {
 		stmts = []string{
+			`CREATE TABLE IF NOT EXISTS observation_content (
+				observation_id INTEGER PRIMARY KEY,
+				content        TEXT    NOT NULL,
+				created_at     INTEGER NOT NULL,
+				updated_at     INTEGER NOT NULL,
+				FOREIGN KEY(observation_id) REFERENCES observations(id) ON DELETE CASCADE
+			)`,
 			`INSERT OR IGNORE INTO observation_content(observation_id, content, created_at, updated_at)
 			 SELECT id, content, created_at, updated_at FROM observations`,
 			`UPDATE observations SET content = substr(content, 1, 300) WHERE content <> substr(content, 1, 300)`,
@@ -310,6 +325,59 @@ func (s *Store) v3ContentSplit(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("v3_content_split: %w\nSQL: %.200s", err, stmt)
 		}
+	}
+	return nil
+}
+
+// v4RelationsAndAttachments guarantees the richer Postgres schema exists on older databases.
+func (s *Store) v4RelationsAndAttachments(ctx context.Context, tx *sql.Tx) error {
+	if !s.pg() {
+		return nil
+	}
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS attachments (
+			id             BIGSERIAL   PRIMARY KEY,
+			observation_id BIGINT      NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+			name           TEXT        NOT NULL,
+			mime           TEXT        NOT NULL DEFAULT 'application/octet-stream',
+			size_bytes     BIGINT      NOT NULL DEFAULT 0,
+			sha256         TEXT        NOT NULL DEFAULT '',
+			data           BYTEA       NOT NULL,
+			created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_attachments_observation ON attachments(observation_id)`,
+		`CREATE TABLE IF NOT EXISTS observation_relations (
+			id         BIGSERIAL   PRIMARY KEY,
+			from_id    BIGINT      NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+			to_id      BIGINT      NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+			type       TEXT        NOT NULL DEFAULT 'related',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE(from_id, to_id, type)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_observation_relations_from ON observation_relations(from_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_observation_relations_to ON observation_relations(to_id)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("v4_relations_and_attachments: %w\nSQL: %.200s", err, stmt)
+		}
+	}
+	return nil
+}
+
+// v5RepairTextEncoding rebuilds observation previews from the canonical content table.
+// This avoids byte-level truncation artifacts in observations.content.
+func (s *Store) v5RepairTextEncoding(ctx context.Context, tx *sql.Tx) error {
+	if !s.pg() {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE observations o
+		   SET content = LEFT(COALESCE(oc.content, o.content), 300)
+		  FROM observation_content oc
+		 WHERE oc.observation_id = o.id`)
+	if err != nil {
+		return fmt.Errorf("rebuild observation previews: %w", err)
 	}
 	return nil
 }
