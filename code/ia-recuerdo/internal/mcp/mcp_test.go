@@ -32,7 +32,7 @@ func newTestHandler(t *testing.T) *mcppkg.Handler {
 // Tools manifest
 // ─────────────────────────────────────────────────────────────────
 
-func TestToolList_Has15Tools(t *testing.T) {
+func TestToolList_Has20Tools(t *testing.T) {
 	tools := mcppkg.ToolList()
 	if len(tools) != 20 {
 		t.Fatalf("expected 20 tools, got %d", len(tools))
@@ -659,9 +659,9 @@ func TestHTTPToolList(t *testing.T) {
 	var resp map[string]interface{}
 	json.NewDecoder(rr.Body).Decode(&resp)
 	tools, ok := resp["tools"].([]interface{})
-	if !ok || len(tools) != 16 {
-		t.Fatalf("expected 16 tools in GET /mcp/tools, got %v", resp["tools"])
-	}
+		if !ok || len(tools) != 20 {
+			t.Fatalf("expected 20 tools in GET /mcp/tools, got %v", resp["tools"])
+		}
 }
 
 func TestHTTPBatch(t *testing.T) {
@@ -770,7 +770,7 @@ func TestStreamable_NotificationReturns202(t *testing.T) {
 	}
 }
 
-// tools/list via Streamable HTTP returns 16 tools.
+// tools/list via Streamable HTTP returns 20 tools.
 func TestStreamable_ToolsListSSE(t *testing.T) {
 	mux := newStreamableMux(t)
 
@@ -799,8 +799,8 @@ func TestStreamable_ToolsListSSE(t *testing.T) {
 		t.Fatalf("expected result object, got %v", resp)
 	}
 	tools, ok := result["tools"].([]interface{})
-	if !ok || len(tools) != 16 {
-		t.Fatalf("expected 16 tools, got %v", result["tools"])
+	if !ok || len(tools) != 20 {
+		t.Fatalf("expected 20 tools, got %v", result["tools"])
 	}
 }
 
