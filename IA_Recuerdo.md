@@ -35,6 +35,6 @@ IA_Recuerdo es un servidor MCP de memoria persistente para agentes IA, con API R
 - Producción en CT204
 - Acceso por HTTP en `:7438`
 - PostgreSQL como backend único en producción
-- CT204 se conecta a CT205 por IP directa (`CT205_IP`)
+- CT204 se conecta a CT205 por IP estática de red interna
 - El servicio systemd corre con `-transport http`
 - `GET /healthz` y `GET /api/v1/stats` deben responder para considerar el despliegue sano

@@ -132,7 +132,7 @@ ExecStart=/opt/ia-recuerdo/ia-recuerdo \
 | CT ID | `<CT_ID>` (ej: 204) |
 | PostgreSQL | 15.x + pgvector 0.8.2 (PGDG) |
 | pg_hba auth | `md5` para 127.0.0.1/32 |
-| DB encoding | SQL_ASCII (locale C — sin locale instalado) |
+| DB encoding | UTF8 (locale C — recreada desde SQL_ASCII original) |
 | Binario | `/opt/ia-recuerdo/ia-recuerdo` (-tags postgres) |
 | Transport | `http` para systemd, `both` solo para desarrollo |
 | Puerto | `:7438` |
