@@ -157,7 +157,7 @@ func TestStore_New_WithUpsertConfig(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	s, err := store.New(ctx, cfg)
+	s, err := store.New(ctx, cfg, nil)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

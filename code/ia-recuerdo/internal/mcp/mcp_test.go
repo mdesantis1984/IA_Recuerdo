@@ -20,7 +20,7 @@ func newTestHandler(t *testing.T) *mcppkg.Handler {
 	if dsn == "" {
 		t.Skip("IA_TEST_PG_DSN not set")
 	}
-	s, err := store.New(context.Background(), store.Config{Driver: "postgres", DSN: dsn})
+	s, err := store.New(context.Background(), store.Config{Driver: "postgres", DSN: dsn}, nil)
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}

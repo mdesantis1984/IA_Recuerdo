@@ -21,7 +21,7 @@ func newTestStore(t *testing.T) *store.Store {
 	s, err := store.New(context.Background(), store.Config{
 		Driver: "postgres",
 		DSN:    dsn,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("newTestStore: %v", err)
 	}
