@@ -254,7 +254,7 @@ Scopes del MCP:
 ```bash
 # Base de datos
 IA_DB_DRIVER=postgres
-IA_DB_DSN=postgres://user:pass@host:5432/db?sslmode=disable
+IA_DB_DSN=postgres://user:pass@<DB_HOST>:5432/db?sslmode=disable
 
 # Transport
 IA_TRANSPORT=http|stdio|both
@@ -264,7 +264,7 @@ IA_ADDR=:7438
 IA_PROJECT=default
 
 # Embeddings (Ollama)
-IA_EMBED_URL=http://10.0.0.206:11434/v1/embeddings
+IA_EMBED_URL=http://<OLLAMA_HOST>:11434/v1/embeddings
 IA_EMBED_MODEL=nomic-embed-text
 IA_EMBED_DIMS=768
 IA_EMBED_FORMAT=openai
@@ -276,7 +276,7 @@ IA_UPSERT_THRESHOLD_RELATED=0.75
 IA_UPSERT_WORKERS=2
 
 # Caché (opcional, Valkey)
-IA_VALKEY=10.0.0.207:6379
+IA_VALKEY=<VALKEY_HOST>:6379
 ```
 
 ## Deployment
