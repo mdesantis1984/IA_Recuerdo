@@ -245,11 +245,6 @@ func (h *Handler) memSave(ctx context.Context, args map[string]interface{}) (int
 	if err != nil {
 		return nil, err
 	}
-	// Generate and store embedding if a provider is configured.
-	// Fire-and-forget: embedding failures don't fail the save.
-	if emb, embErr := h.embedder.Embed(ctx, o.Title+" "+o.Content); embErr == nil {
-		_ = h.store.StoreEmbedding(ctx, saved.ID, emb)
-	}
 	// Invalidate context cache after write so mem_context returns fresh data.
 	h.cache.InvalidateContext(ctx, o.Project)
 	return map[string]interface{}{

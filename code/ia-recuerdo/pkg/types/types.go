@@ -100,3 +100,38 @@ type Stats struct {
 	ByProject         map[string]int `json:"by_project"`
 	ByType            map[string]int `json:"by_type"`
 }
+
+// SmartUpsertConfig holds configuration for async smart upsert behavior.
+type SmartUpsertConfig struct {
+	Enabled          bool    `json:"enabled"`
+	ThresholdUpdate  float64 `json:"threshold_update"`
+	ThresholdRelated float64 `json:"threshold_related"`
+	AsyncWorkers     int     `json:"async_workers"`
+}
+
+// DefaultSmartUpsertConfig returns the default configuration for smart upsert.
+func DefaultSmartUpsertConfig() SmartUpsertConfig {
+	return SmartUpsertConfig{
+		Enabled:          true,
+		ThresholdUpdate:  0.92,
+		ThresholdRelated: 0.70,
+		AsyncWorkers:     2,
+	}
+}
+
+// PostSaveAction describes what the post-save worker decided.
+type PostSaveAction string
+
+const (
+	PostSaveActionUpdate  PostSaveAction = "updated"
+	PostSaveActionRelated PostSaveAction = "related"
+	PostSaveActionNone    PostSaveAction = "none"
+)
+
+// PostSaveResult is returned by the post-save worker (async, non-blocking).
+type PostSaveResult struct {
+	ObservationID int64          `json:"observation_id"`
+	Action       PostSaveAction  `json:"action"`
+	TargetID     int64           `json:"target_id,omitempty"`
+	Similarity   float64         `json:"similarity,omitempty"`
+}

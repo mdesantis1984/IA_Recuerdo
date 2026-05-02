@@ -72,6 +72,33 @@ make build-postgres
 - `DELETE /api/v1/keys/{id}`
 - `GET /metrics`
 
+## Configuración de Embeddings
+
+Para búsqueda semántica, el sistema usa un servicio Ollama dedicado (CT206).
+
+```bash
+# Endpoint del servicio de embeddings
+OLLAMA_EMBEDDINGS_URL=http://10.0.0.206:11434/v1/embeddings
+OLLAMA_EMBEDDINGS_MODEL=nomic-embed-text
+```
+
+> **Importante:** La URL debe incluir `/v1/embeddings` completo. Ollama requiere la ruta exacta.
+
+## Smart Upsert (Deduplicación Semántica)
+
+El sistema soporta deduplicación automática basada en similitud semántica:
+
+```bash
+IA_UPSERT_ENABLED=true
+IA_UPSERT_THRESHOLD_UPDATE=0.85
+IA_UPSERT_THRESHOLD_RELATED=0.75
+IA_UPSERT_WORKERS=2
+```
+
+Cuando `topic_key` no se especifica, el sistema genera uno automático basado en el tipo y título.
+
+Ver: [ADR-001_Smart_Upsert_Semantic_Dedupe.md](../ADR-001_Smart_Upsert_Semantic_Dedupe.md)
+
 ## Modelo de datos
 
 - `observations`: metadata ligera

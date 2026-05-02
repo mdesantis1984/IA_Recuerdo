@@ -10,17 +10,33 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mdesantis1984/ia-recuerdo/internal/embedding"
 	"github.com/mdesantis1984/ia-recuerdo/pkg/types"
 )
 
+// postSaveRequest holds data for async post-save processing.
+type postSaveRequest struct {
+	obsID     int64
+	title     string
+	content   string
+	project   string
+	topicKey  string
+	createdAt time.Time
+}
+
 // Store is the central persistence layer.
 type Store struct {
-	db        *sql.DB
-	driver    string
-	embedDims int    // dimension for pgvector column (default 768)
+	db          *sql.DB
+	driver      string
+	embedDims   int
+	embedder    embedding.Provider
+	upsertCfg   types.SmartUpsertConfig
+	postSaveCh  chan postSaveRequest
+	wg          sync.WaitGroup
 }
 
 // Config holds the database configuration.
@@ -28,28 +44,187 @@ type Config struct {
 	Driver    string // postgres
 	DSN       string // postgres DSN
 	EmbedDims int    // vector dimension for pgvector (default 768). Only used on Postgres.
+	UpsertCfg types.SmartUpsertConfig
 }
 
 // New opens the DB, runs migrations, and returns a ready Store.
-func New(ctx context.Context, cfg Config) (*Store, error) {
+func New(ctx context.Context, cfg Config, embedder embedding.Provider) (*Store, error) {
 	db, err := openDB(cfg)
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db, driver: strings.ToLower(cfg.Driver), embedDims: cfg.EmbedDims}
+	s := &Store{db: db, driver: strings.ToLower(cfg.Driver), embedDims: cfg.EmbedDims, embedder: embedder}
 	if s.embedDims == 0 {
 		s.embedDims = 768
+	}
+	if cfg.UpsertCfg.Enabled {
+		s.upsertCfg = cfg.UpsertCfg
+	} else {
+		s.upsertCfg = types.DefaultSmartUpsertConfig()
 	}
 	if err := s.migrate(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migration: %w", err)
 	}
+	s.startPostSaveWorkers()
 	log.Printf("[store] Ready (%s)", cfg.Driver)
 	return s, nil
 }
 
-// Close releases the database connection.
-func (s *Store) Close() error { return s.db.Close() }
+// Close releases the database connection and stops async workers.
+func (s *Store) Close() error {
+	close(s.postSaveCh)
+	s.wg.Wait()
+	return s.db.Close()
+}
+
+// startPostSaveWorkers launches async workers for post-save processing.
+func (s *Store) startPostSaveWorkers() {
+	s.postSaveCh = make(chan postSaveRequest, 100)
+	for i := 0; i < s.upsertCfg.AsyncWorkers; i++ {
+		s.wg.Add(1)
+		go func(workerID int) {
+			defer s.wg.Done()
+			for req := range s.postSaveCh {
+				s.processPostSave(req)
+			}
+		}(i)
+	}
+	log.Printf("[store] Started %d post-save workers", s.upsertCfg.AsyncWorkers)
+}
+
+// processPostSave handles async similarity detection and smart upsert.
+func (s *Store) processPostSave(req postSaveRequest) {
+	ctx := context.Background()
+	if s.upsertCfg.Enabled {
+		s.findAndLinkSimilar(ctx, req)
+	}
+}
+
+// SmartTopicKey generates a stable topic_key from title and type if not provided.
+func SmartTopicKey(title, obsType string) string {
+	title = strings.ToLower(title)
+	words := strings.Fields(title)
+	if len(words) > 5 {
+		words = words[:5]
+	}
+	slug := strings.Join(words, "-")
+	slug = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			return r
+		}
+		return '-'
+	}, slug)
+	slug = strings.Trim(slug, "-")
+	family := "discovery"
+	switch {
+	case strings.Contains(obsType, "arch"), strings.Contains(obsType, "design"), strings.Contains(obsType, "adr"):
+		family = "architecture"
+	case strings.Contains(obsType, "bug"), strings.Contains(obsType, "fix"), strings.Contains(obsType, "error"):
+		family = "bug"
+	case strings.Contains(obsType, "decision"):
+		family = "decision"
+	case strings.Contains(obsType, "pattern"):
+		family = "pattern"
+	case strings.Contains(obsType, "config"):
+		family = "config"
+	case strings.Contains(obsType, "learning"), strings.Contains(obsType, "lesson"):
+		family = "learning"
+	}
+	return fmt.Sprintf("%s/%s", family, slug)
+}
+
+// findAndLinkSimilar finds similar observations and creates relations or updates.
+func (s *Store) findAndLinkSimilar(ctx context.Context, req postSaveRequest) {
+	if !s.pg() || req.obsID <= 0 {
+		return
+	}
+	// Load full content for embedding
+	content := req.content
+	if content == "" {
+		if c, err := s.loadObservationContent(ctx, req.obsID); err == nil {
+			content = c
+		}
+	}
+	if content == "" {
+		return
+	}
+	// Generate embedding (requires embedder - this is handled at handler level)
+	// For now we do similarity search with existing embeddings only
+	similar, err := s.findSimilarByEmbedding(ctx, req.obsID, req.project, 5)
+	if err != nil || len(similar) == 0 {
+		return
+	}
+	best := similar[0]
+	thresholdUpdate := s.upsertCfg.ThresholdUpdate
+	thresholdRelated := s.upsertCfg.ThresholdRelated
+	if best.Rank >= thresholdUpdate {
+		// UPDATE: same topic, content evolved - update the existing, delete the new
+		s.mergeIntoExisting(ctx, best.ID, req.obsID, req.topicKey, req.createdAt)
+		log.Printf("[store] SmartUpsert: updated obs %d into %d (similarity=%.2f)", req.obsID, best.ID, best.Rank)
+	} else if best.Rank >= thresholdRelated {
+		// RELATED: create relation between them
+		_, err := s.SaveRelation(ctx, req.obsID, best.ID, "related_to")
+		if err == nil {
+			log.Printf("[store] SmartUpsert: linked obs %d -> %d (similarity=%.2f)", req.obsID, best.ID, best.Rank)
+		}
+	}
+	// If similarity < thresholdRelated, do nothing (genuinely new)
+}
+
+// findSimilarByEmbedding finds similar observations using cosine similarity.
+// Excludes the observation itself (req.obsID).
+func (s *Store) findSimilarByEmbedding(ctx context.Context, selfID int64, project string, limit int) ([]types.SearchResult, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	// Get self embedding to find similar ones
+	var embeddingStr string
+	err := s.db.QueryRowContext(ctx,
+		"SELECT embedding::text FROM observations WHERE id=$1 AND embedding IS NOT NULL",
+		selfID).Scan(&embeddingStr)
+	if err != nil {
+		return nil, err
+	}
+	where := "deleted_at IS NULL AND embedding IS NOT NULL AND id != $1"
+	args := []interface{}{selfID}
+	ph := 2
+	if project != "" {
+		where += fmt.Sprintf(" AND project=$%d", ph)
+		args = append(args, project)
+		ph++
+	}
+	args = append(args, limit)
+	q := fmt.Sprintf(`SELECT %s,
+		1 - (embedding <=> $1::vector) AS rank,
+		left(COALESCE(oc.content, observations.content), 300) AS snippet
+		FROM observations
+		LEFT JOIN observation_content oc ON oc.observation_id = observations.id
+		WHERE %s
+		ORDER BY embedding <=> $1::vector
+		LIMIT $%d`, obsColumnsAlias("observations"), where, ph)
+	rows, err := s.db.QueryContext(ctx, q, append([]interface{}{embeddingStr}, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return s.scanResults(rows)
+}
+
+// mergeIntoExisting updates target with new content and soft-deletes source.
+func (s *Store) mergeIntoExisting(ctx context.Context, targetID, sourceID int64, topicKey string, createdAt time.Time) {
+	now := time.Now().UTC()
+	// Update target with source content if topic matches
+	if topicKey != "" {
+		q := `UPDATE observations SET
+			content=(SELECT content FROM observation_content WHERE observation_id=$1),
+			updated_at=$2, last_seen_at=$2, revision_count=revision_count+1
+			WHERE id=$3`
+		_, _ = s.db.ExecContext(ctx, q, sourceID, now, targetID)
+	}
+	// Soft-delete source
+	_, _ = s.db.ExecContext(ctx, "UPDATE observations SET deleted_at=$1 WHERE id=$2", now, sourceID)
+}
 
 func (s *Store) pg() bool { return true }
 
@@ -62,12 +237,12 @@ func (s *Store) ph(n int) string {
 // Observations
 // ────────────────────────────────────────────────────────────────
 
-// SaveObservation inserts or upserts (when topic_key set) an observation.
+// SaveObservation inserts an observation and triggers async smart upsert.
 // Returns the saved observation with its assigned ID.
 func (s *Store) SaveObservation(ctx context.Context, o *types.Observation) (*types.Observation, error) {
 	now := time.Now().UTC()
 
-	// Upsert by topic_key + project + scope
+	// Upsert by topic_key + project + scope (existing behavior)
 	if o.TopicKey != "" {
 		existing, err := s.findByTopicKey(ctx, o.TopicKey, o.Project, string(o.Scope))
 		if err != nil {
@@ -83,7 +258,30 @@ func (s *Store) SaveObservation(ctx context.Context, o *types.Observation) (*typ
 		return s.touchDuplicate(ctx, dup.ID, now)
 	}
 
-	return s.insertObservation(ctx, o, now)
+	// Insert new observation
+	saved, err := s.insertObservation(ctx, o, now)
+	if err != nil {
+		return nil, err
+	}
+
+	// Enqueue async post-save for similarity detection (non-blocking)
+	if s.postSaveCh != nil {
+		select {
+		case s.postSaveCh <- postSaveRequest{
+			obsID:     saved.ID,
+			title:     o.Title,
+			content:   o.Content,
+			project:   o.Project,
+			topicKey:  o.TopicKey,
+			createdAt: now,
+		}:
+		default:
+			// Channel full, skip post-save to not block caller
+			log.Printf("[store] post-save channel full, skipping similarity check for obs %d", saved.ID)
+		}
+	}
+
+	return saved, nil
 }
 
 func (s *Store) insertObservation(ctx context.Context, o *types.Observation, now time.Time) (*types.Observation, error) {
@@ -133,6 +331,16 @@ func (s *Store) insertObservation(ctx context.Context, o *types.Observation, now
 	o.CreatedAt = now
 	o.UpdatedAt = now
 	o.LastSeenAt = now
+
+	if s.embedder != nil {
+		text := o.Title + " " + o.Content
+		go func(obsID int64, txt string) {
+			if emb, err := s.embedder.Embed(context.Background(), txt); err == nil {
+				_ = s.StoreEmbedding(context.Background(), obsID, emb)
+			}
+		}(id, text)
+	}
+
 	return o, nil
 }
 

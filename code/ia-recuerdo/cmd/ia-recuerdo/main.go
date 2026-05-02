@@ -16,6 +16,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/mdesantis1984/ia-recuerdo/internal/cache"
@@ -23,6 +24,7 @@ import (
 	"github.com/mdesantis1984/ia-recuerdo/internal/mcp"
 	"github.com/mdesantis1984/ia-recuerdo/internal/server"
 	"github.com/mdesantis1984/ia-recuerdo/internal/store"
+	"github.com/mdesantis1984/ia-recuerdo/pkg/types"
 )
 
 var version = "dev"
@@ -38,6 +40,10 @@ func main() {
 	embedFmt   := flag.String("embed-format", envOr("IA_EMBED_FORMAT", "openai"),    "Embedding API format: openai|ollama")
 	embedDims  := flag.Int("embed-dims",      envOrInt("IA_EMBED_DIMS", 768),         "Embedding vector dimensions (768=nomic-embed-text, 1536=OpenAI)")
 	valkeyAddr := flag.String("valkey",        envOr("IA_VALKEY", ""),                "Valkey address (host:port). Empty = disabled")
+	upsertEnabled  := flag.Bool("upsert-enabled",  envOrBool("IA_UPSERT_ENABLED", true),         "Enable smart upsert (default: true)")
+	upsertWorkers  := flag.Int("upsert-workers",   envOrInt("IA_UPSERT_WORKERS", 2),             "Async workers for post-save processing")
+	upsertThreshUpdate   := flag.Float64("upsert-thresh-update",   envOrFloat64("IA_UPSERT_THRESH_UPDATE", 0.92), "Similarity threshold for update (0.92)")
+	upsertThreshRelated  := flag.Float64("upsert-thresh-related",  envOrFloat64("IA_UPSERT_THRESH_RELATED", 0.70), "Similarity threshold for relation (0.70)")
 	project    := flag.String("project",       envOr("IA_PROJECT", "default"),         "Default project name")
 	showVer    := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
@@ -57,12 +63,24 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// ── Embedding provider (optional) ───────────────────────────
+	var emb embedding.Provider = &embedding.Disabled{}
+	if *embedURL != "" {
+		emb = embedding.New(*embedURL, *embedModel, *embedToken, *embedFmt, *embedDims)
+	}
+
 	// ── Store ──────────────────────────────────────────────────────
 	st, err := store.New(ctx, store.Config{
 		Driver:    *dbDriver,
 		DSN:       *dbDSN,
 		EmbedDims: *embedDims,
-	})
+		UpsertCfg: types.SmartUpsertConfig{
+			Enabled:          *upsertEnabled,
+			ThresholdUpdate:  *upsertThreshUpdate,
+			ThresholdRelated: *upsertThreshRelated,
+			AsyncWorkers:     *upsertWorkers,
+		},
+	}, emb)
 	if err != nil {
 		log.Fatalf("cannot open store: %v", err)
 	}
@@ -71,12 +89,6 @@ func main() {
 	// ── Cache (optional) ──────────────────────────────────────────
 	ca := cache.New(*valkeyAddr)
 	defer ca.Close()
-
-	// ── Embedding provider (optional) ───────────────────────────
-	var emb embedding.Provider = &embedding.Disabled{}
-	if *embedURL != "" {
-		emb = embedding.New(*embedURL, *embedModel, *embedToken, *embedFmt, *embedDims)
-	}
 
 	// ── MCP Handler ───────────────────────────────────────────────
 	h := mcp.New(st, ca, emb)
@@ -122,6 +134,28 @@ func envOrInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		var n int
 		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func envOrBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		switch strings.ToLower(v) {
+		case "true", "1", "yes", "on":
+			return true
+		case "false", "0", "no", "off":
+			return false
+		}
+	}
+	return fallback
+}
+
+func envOrFloat64(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		var n float64
+		if _, err := fmt.Sscanf(v, "%f", &n); err == nil {
 			return n
 		}
 	}
