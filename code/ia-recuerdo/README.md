@@ -1,37 +1,39 @@
 # IA_Recuerdo
 
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev/)
-[![MCP](https://img.shields.io/badge/MCP-Compatible-FF6B6B?logo=robot)](https://modelcontextprotocol.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+> CT204: memoria persistente centralizada para agentes IA.
 
-Servicio MCP de memoria persistente centralizada para agentes IA locales. Usa PostgreSQL + pgvector para búsqueda semántica y CT206 para embeddings.
+## Qué es
 
----
+IA_Recuerdo es el servicio de memoria de la infraestructura IA local. Expone MCP y REST API sobre PostgreSQL, con soporte para búsqueda semántica, adjuntos y relaciones entre observaciones.
 
-## Resumen
+## Dónde vive
 
-- Memoria persistente por proyecto y sesión.
-- Búsqueda full-text y semántica (embeddings).
-- Smart upsert con deduplicación semántica automática.
-- 18 tools MCP registradas.
-- Relaciones y adjuntos entre observaciones.
-- API keys con scopes (read, write, admin).
+- Código: [`code/ia-recuerdo`](code/ia-recuerdo)
+- SDD: [`IA_Recuerdo.md`](IA_Recuerdo.md)
+- Migración/operación: [`IA_Recuerdo_Migracion_PostgreSQL.md`](IA_Recuerdo_Migracion_PostgreSQL.md)
 
----
+## Infraestructura
 
-## Características principales
+- CT203: orquestador MCP
+- CT204: servicio de memoria persistente
+- CT205: PostgreSQL 15 + pgvector
+- CT206: Ollama para embeddings (`nomic-embed-text`)
+
+## Acceso
+
+- MCP HTTP: `http://<HOST>:7438/mcp`
+- REST API: `http://<HOST>:7438/api/v1`
+
+## Características
 
 | Característica | Descripción |
 |---|---|
 | Memoria persistente | observations con metadata y contenido separado |
 | Búsqueda semántica | pgvector con embeddings de 768 dims |
-| Smart Upsert | Deduplicación basada en similitud semántica |
+| Smart Upsert | Deduplicación basada en similitud semántica (ADR-001) |
 | MCP tools | 18 tools para memoria, búsqueda, sesiones y gestión |
-| REST API | Endpoints para observaciones, búsqueda, métricas |
 | API keys | Autenticación con scopes configurables |
 | Async workers | Generación de embeddings sin bloquear el save |
-
----
 
 ## Tools MCP (18 disponibles)
 
@@ -56,129 +58,46 @@ Servicio MCP de memoria persistente centralizada para agentes IA locales. Usa Po
 | `mem_save_attachment` | Guardar adjunto binario |
 | `mem_list_relations` | Listar relaciones entre observaciones |
 
----
+## Estado actual
 
-## Acceso
-
-| Endpoint | URL | Descripción |
-|---|---|---|
-| MCP HTTP | `http://<HOST>:7438/mcp` | Protocolo MCP para agentes IA |
-| Health | `http://<HOST>:7438/healthz` | Verificación de estado del servicio |
-
----
-
-## Requisitos
-
-1. CT204:7438 ejecutándose como servicio Go.
-2. PostgreSQL 15+ con extensión pgvector.
-3. CT206:11434 con Ollama y modelo `nomic-embed-text`.
-4. API keys configuradas para acceso REST.
-
----
-
-## Uso rápido (MCP)
-
-```json
-{
-  "method": "tools/call",
-  "params": {
-    "name": "mem_save",
-    "arguments": {
-      "title": "Decisión de arquitectura",
-      "content": "Usar PostgreSQL con pgvector para embeddings",
-      "type": "decision",
-      "project": "mi-proyecto"
-    }
-  }
-}
-```
-
----
-
-## Configuración (ejemplo)
-
-```jsonc
-{
-  "mcp_server": {
-    "host": "<HOST>",
-    "port": 7438,
-    "transport": "http"
-  },
-  "database": {
-    "driver": "postgres",
-    "dsn": "postgres://user:pass@<DB_HOST>:5432/ia_recuerdo?sslmode=disable"
-  },
-  "embeddings": {
-    "url": "http://<OLLAMA_HOST>:11434/v1/embeddings",
-    "model": "nomic-embed-text",
-    "dims": 768
-  },
-  "smart_upsert": {
-    "enabled": true,
-    "threshold_update": 0.85,
-    "threshold_related": 0.75,
-    "workers": 2
-  }
-}
-```
-
----
-
-## Arquitectura
-
-```
-CT204 (Go Service :7438)
-  │
-  ├─ MCP Handler
-  │   └─ 18 Tools registradas
-  │
-  ├─ Store Layer
-  │   ├─ PostgreSQL + pgvector
-  │   ├─ Async embedding workers
-  │   └─ Smart upsert con deduplicación
-  │
-  ├─ Embedding Provider
-  │   └─ CT206 Ollama :11434
-  │       └─ nomic-embed-text (768 dims)
-  │
-  ├─ Cache Layer
-  │   └─ Valkey (opcional)
-  │
-  └─ REST API
-      ├─ /api/v1/observations
-      ├─ /api/v1/search
-      ├─ /api/v1/stats
-      └─ /api/v1/keys
-```
-
----
+- PostgreSQL-only en producción
+- Búsqueda semántica con `pgvector` funcionando
+- Smart Upsert ADR-001 habilitado con workers async
+- Embeddings generados post-INSERT (async)
+- Adjuntos y relaciones habilitados
+- Contenido pesado separado de metadata
+- CT204 se conecta a CT205 (PostgreSQL) por IP estática de red interna
+- El servicio productivo corre con `-transport http`
+- Embed URL: `http://<OLLAMA_HOST>:11434/v1/embeddings`
 
 ## Changelog
 
 ### 1.1.0 — 2026-05-02
-- Fix: URL de embedding corregida `/v1` → `/v1/embeddings`.
-- Feature: Embedding generation en Store layer (async post-INSERT).
-- Feature: Smart upsert ADR-001 con deduplicación semántica.
-- Feature: ADR-001 documentado y tests implementados.
-- Refactor: README match IA_Buscar structure.
+- Fix: URL de embedding corregida `/v1` → `/v1/embeddings`
+- Feature: Embedding generation en Store layer (async post-INSERT)
+- Feature: Smart upsert ADR-001 con deduplicación semántica
+- Feature: ADR-001 documentado y tests implementados
+- Refactor: README restructurado
 
 ### 1.0.0 — 2026-04-26
-- Servicio MCP de memoria inicial.
-- 18 tools MCP registradas.
-- PostgreSQL con pgvector para persistencia.
-- API keys con scopes.
-- REST API completa.
+- Servicio MCP de memoria inicial
+- 18 tools MCP registradas
+- PostgreSQL con pgvector para persistencia
+- API keys con scopes
+- REST API completa
 
----
+## Flujo GitFlow
+
+- `main` para producción
+- `develop` para integración
+- ramas `feature/*` o `release/*` para cambios
 
 ## Seguridad
 
-- API keys con hashbcrypt para autenticación.
-- Scopes configurables (read, write, admin, owner).
-- Sin telemetría ni envío de datos a terceros.
-- Validación de inputs en todos los endpoints.
-
----
+- API keys con hashbcrypt para autenticación
+- Scopes configurables (read, write, admin, owner)
+- Sin telemetría ni envío de datos a terceros
+- Validación de inputs en todos los endpoints
 
 ## Licencia
 
